@@ -6,4 +6,7 @@ echo "TypeScript checks: backend"
 echo "TypeScript checks: frontend"
 ( cd frontend && npx tsc -b --noEmit --pretty )
 
+echo "TypeScript checks: canton-connect-kit"
+( cd canton-connect-kit && npx tsc -b --noEmit --pretty )
+
 echo "All TypeScript checks passed. Proceeding with push."

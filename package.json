@@ -5,7 +5,8 @@
   "type": "module",
   "workspaces": [
     "backend",
-    "frontend"
+    "frontend",
+    "canton-connect-kit"
   ],
   "scripts": {
     "backend:dev": "npm --prefix backend run dev",

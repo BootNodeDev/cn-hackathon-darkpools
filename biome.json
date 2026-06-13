@@ -11,6 +11,7 @@
     "includes": [
       "backend/**",
       "frontend/**",
+      "canton-connect-kit/**",
       "!**/api-specs",
       "!**/routeTree.gen.ts"
     ]
@@ -51,6 +52,7 @@
     },
     {
       "includes": [
+        "canton-connect-kit/**",
         "frontend/src/**",
         "!frontend/src/**/*.test.ts",
         "!frontend/src/**/*.test.tsx"
