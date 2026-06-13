@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(set -e)",
+      "Bash(npm run *)",
+      "Bash(npm install *)",
+      "Bash(npm --prefix frontend *)",
+      "Bash(npm --prefix backend *)",
+      "Bash(npm --prefix canton-connect-kit *)",
+      "Bash(npm --prefix contracts *)",
+      "Bash(sh .husky/pre-push)",
+      "Bash(docker info *)",
+      "Bash(docker compose *)",
+      "Bash(curl -sf -o /dev/null --max-time 1 http://localhost:3012/)",
+      "Bash(curl -sf -o /dev/null --max-time 1 http://localhost:3020/healthz)",
+      "Bash(curl -s http://localhost:3020/healthz)",
+      "Bash(curl -s http://localhost:3020/readyz)",
+      "Bash(lsof -iTCP:3012 -iTCP:3020 -sTCP:LISTEN)",
+      "Bash(lsof -nP -iTCP:3012 -iTCP:3020 -sTCP:LISTEN)",
+      "Bash(open http://localhost:3012/)",
+      "Bash(open http://localhost:3020/)"
+    ]
+  }
+}
