@@ -26,7 +26,7 @@ See [`architecture.md`](architecture.md) for the module map and request lifecycl
 # Development (mock mode):
 DARK_POOL_MOCK=1 npm --prefix backend run dev
 
-# Tests (33/33, no network):
+# Tests (35/35, no network):
 npm --prefix backend test
 
 # Lint:
@@ -47,14 +47,17 @@ npm run backend:logs
 | `DARK_POOL_BOOTSTRAP` | yes | -- | Path to `dark-pool.bootstrap.json` |
 | `CANTON_BACKEND_TOKEN` | yes (static) | -- | Static bearer JWT |
 | `FIVENORTH_CLIENT_SECRET` | yes (M2M) | -- | M2M OAuth secret (overrides static token) |
+| `FIVENORTH_AUTH_URL` | no | FiveNorth sandbox token URL | M2M token endpoint |
+| `FIVENORTH_CLIENT_ID` | no | `validator-devnet-m2m` | M2M client id |
+| `FIVENORTH_SCOPE` | no | `daml_ledger_api` | M2M scope |
 | `DARK_POOL_SERVICE_PORT` | no | `3020` | HTTP listen port |
 | `MATCH_INTERVAL_MS` | no | `300000` | Heartbeat interval (1s – 24h) |
-| `CORS_ORIGINS` | no | `*` | CORS allowed origins |
+| `CORS_ORIGINS` | no | `*` | CORS allowed origins (comma-separated) |
 
-Auth precedence: `DARK_POOL_MOCK=1` → mock; `CANTON_BACKEND_TOKEN` → static; `FIVENORTH_CLIENT_SECRET` → M2M.
+Auth precedence: `DARK_POOL_MOCK=1` → mock; `CANTON_BACKEND_TOKEN` → static; `FIVENORTH_CLIENT_SECRET` → M2M. The `FIVENORTH_*` knobs only matter when the M2M path is selected.
 
 ## Validation Checklist
 
 - `npm --prefix backend run lint`
-- `npm --prefix backend test` (must be 33/33)
+- `npm --prefix backend test` (35/35)
 - `npm --prefix backend run build` (tsc, zero errors)

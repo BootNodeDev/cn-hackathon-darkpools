@@ -1,16 +1,16 @@
 # Dark Pool Service (`@canton-dappbooster/dark-pool-service`)
 
-Off-ledger backend for the CN Dark Pool: a single Express 5 + TypeScript process that serves the trader/venue REST API, runs a pure matching engine on a schedule, and settles crossing orders on a Canton ledger via the JSON Ledger API v2.
+Off-ledger backend for the CN Dark Pool: a single Express 5 + TypeScript process that serves the trader/venue REST API, runs a pure matching engine on a schedule, and settles crossing orders on a Canton ledger via the JSON Ledger API v2. The frontend reads live orders, balances, and fills from this service; the matcher pairs crossing orders and settles them atomically on the ledger.
 
-**Status (2026-06-13):** Implemented and **green — 33/33 tests** (units + a mock place→match→settle integration), typecheck clean. **Runs fully offline in mock mode.** Live-ledger end-to-end, containerization, and DO deploy are the remaining steps (§8). Branch `dark-pool-service` (off `darkpool`) — backend only; the Daml/contracts are a separate concern (§7).
+It also runs fully offline in **mock mode** (`DARK_POOL_MOCK=1`) against an in-memory ledger, so the frontend can be developed without a Canton node. 35/35 tests green, typecheck clean. Ships with a `Dockerfile` and a service in the root `docker-compose.yml`.
 
-## 1. Assumptions (what this service expects)
+## 1. Deployment model
 
-- **A Canton ledger over JSON Ledger API v2** where the dark-pool venue contracts and a funding/faucet token are already **deployed**, with a pool + parties + seed holdings **provisioned**. That setup is provided separately (contracts side) — **not in this branch**. The service reads the addresses (parties, pool, factory, instruments) from a `dark-pool.bootstrap.json` it's pointed at.
-- **Custodial, co-hosted:** one bearer token can `actAs` the venue, the token-admin, and the trader parties. `POST /orders` therefore works only for **co-hosted** parties; reads and `/faucet` work for any partyId.
+- **A Canton ledger over JSON Ledger API v2** hosts the dark-pool venue contracts and a funding/faucet token, with a pool + parties + seed holdings provisioned (the contracts side, [`../contracts/`](../contracts/)). The service reads the addresses (parties, pool, factory, instruments) from the `dark-pool.bootstrap.json` it's pointed at.
+- **Custodial, co-hosted:** one bearer token can `actAs` the venue, the token-admin, and the trader parties. `POST /orders` acts as a co-hosted party; reads and `/faucet` work for any partyId.
 - **The ledger is the source of truth** — no database; an in-memory projection (polled ACS) backs reads and is rebuilt on boot.
 - **Decimals are strings**, computed as scaled BigInt to mirror the on-ledger rounding exactly.
-- **Mock mode assumes none of the above** — it's self-contained (`DARK_POOL_MOCK=1`).
+- **Mock mode** is self-contained (`DARK_POOL_MOCK=1`): an in-memory fake ledger with a seeded fixture, no Canton and no token needed.
 
 ## 2. What it is / why
 
@@ -22,29 +22,40 @@ Single process (the matcher is an in-process scheduled pass, not a daemon). The 
 
 ## 4. How to run
 
+Run from the repo root (one `npm install` links every workspace).
+
 **Mock — offline, zero setup (use this to develop the frontend):**
 ```bash
-DARK_POOL_MOCK=1 npm --prefix canton-barebones/dark-pool-service run dev
+npm run backend:dev          # tsx watch, DARK_POOL_MOCK defaults on
+# or directly:
+DARK_POOL_MOCK=1 npm --prefix backend run dev
 # → http://localhost:3020, seeded data, live matching, no ledger/token needed
+```
+Mock mode in a container:
+```bash
+npm run backend:up           # docker compose up -d --build dark-pool-backend
+npm run backend:logs         # tail logs
+npm run backend:down         # stop
 ```
 **Against a live ledger:** point it at the bootstrap config + a token:
 ```bash
 CANTON_JSON_API_URL=<json-api> DARK_POOL_BOOTSTRAP=<path/to/dark-pool.bootstrap.json> \
 CANTON_BACKEND_TOKEN=<token>   # or FIVENORTH_CLIENT_SECRET=… for M2M
-npm --prefix canton-barebones/dark-pool-service run dev
+npm --prefix backend run dev
 ```
 Auth precedence: `DARK_POOL_MOCK=1` → mock; else `CANTON_BACKEND_TOKEN` → static; else `FIVENORTH_CLIENT_SECRET` → M2M.
 
 ## 5. How to test
 
 ```bash
-npm --prefix canton-barebones/dark-pool-service test     # 33/33, no network
+npm --prefix backend test     # 35/35, no network
+# or: npm run backend:test
 ```
-Covers decimal exactness, matcher (cross/min-fill/price-time/expiry/self-match), funding selection, projection reducers, settlement (+ fail-closed), and an end-to-end mock place→match→settle→cancel→expiry. Lint: `npm --prefix canton-barebones/dark-pool-service run lint` (Biome).
+Covers decimal exactness, matcher (cross/min-fill/price-time/expiry/self-match), funding selection, projection reducers, settlement (+ fail-closed), and an end-to-end mock place→match→settle→cancel→expiry. Lint: `npm --prefix backend run lint` (Biome).
 
 ## 6. API & frontend integration
 
-Port `3020`. JSON shaped to the frontend's existing `DarkPoolClient` types, so wiring is a swap, not a rewrite.
+Port `3020`. JSON is shaped to the frontend's `DarkPoolClient` types.
 
 | Method · path | Body / query | Returns |
 | --- | --- | --- |
@@ -57,29 +68,21 @@ Port `3020`. JSON shaped to the frontend's existing `DarkPoolClient` types, so w
 | `POST /venue/match` | — | `{ranAt,matched,rejected,schedule}` — run a pass now |
 | `PUT /venue/schedule` | `{intervalMs}` | `{intervalMs,nextRunAt}` (bounds 1s–24h) |
 
-DTOs: `Order={cid,poolId,side,quantity,limitPrice,minFill,submittedAt,expiresAt}`, `Fill={tradeId,poolId,side,price,quantity,settledAt}`, `Trade={tradeId,poolId,price,quantity,buyer,seller,settledAt}`, `Balance={instrument,total,declared}`. All amounts are **strings**.
+DTOs: `Order={cid,poolId,side,quantity,limitPrice,minFill,submittedAt,expiresAt}`, `Fill={tradeId,poolId,side,price,quantity,settledAt}`, `Trade={tradeId,poolId,price,quantity,buyer,seller,settledAt}`, `Balance={instrument,total,declared}`. All amounts are **strings**. Full request/response examples are in [`API.md`](API.md).
 
-**To plug the frontend in:**
-1. Develop against **mock mode** (§4) — full API, no backend deps.
-2. Implement `HttpDarkPoolClient` replacing `MockDarkPoolClient` in `dapp/frontend/src/darkpool/DarkPoolProvider.tsx`: poll `GET /venue` (venue view) and `GET /trade?party=<connectedParty>` (trade view) every ~2–3 s and call the store's `notify()`; `placeOrder`→`POST /orders`, `cancelOrder`→`DELETE /orders/:cid`, faucet→`POST /faucet`. Base URL via `VITE_DARK_POOL_API`.
-3. Countdown is free: render `schedule.nextRunAt` (absolute) client-side; "Run matching now" → `POST /venue/match`; change cadence → `PUT /venue/schedule`.
-4. Darkness: never render other traders' orders in the trade view — `/trade` returns only the caller's; the book is venue-only.
-5. Type gaps: `submittedAt` is a ledger ordering key (not ms); numbers are strings; `Pool` may lack `baseLabel`/`quoteLabel` (derive from `base.id`/`quote.id`).
-6. Identity: `POST /orders` needs a co-hosted (seeded) party; reads/faucet take any partyId.
-7. Known blocker (frontend-side, not the API): `localhost:3012` renders blank — connect-wallet gate / wallet-companion on `:3011`.
+**Frontend wiring (`frontend/src/darkpool/`):**
+1. The `DarkPoolClient` interface fronts the data layer; the HTTP client points at `VITE_DARK_POOL_API` (defaults to `http://localhost:3020`). The mock client backs offline development.
+2. The venue view polls `GET /venue`; the trade view polls `GET /trade?party=<connectedParty>` every ~2–3 s. `placeOrder`→`POST /orders`, `cancelOrder`→`DELETE /orders/:cid`, faucet→`POST /faucet`.
+3. Countdown: render `schedule.nextRunAt` (absolute) client-side; "Run matching now" → `POST /venue/match`; change cadence → `PUT /venue/schedule`.
+4. Darkness: the trade view only ever shows the caller's own orders — `/trade` returns only those; the full book is venue-only.
+5. Type notes: `submittedAt` is a ledger ordering key (not ms); numbers are strings; `Pool` labels derive from `base.id`/`quote.id`.
+6. Identity: `POST /orders` acts as a co-hosted (seeded) party; reads/faucet take any partyId.
 
-## 7. Contracts (external — not this branch)
+## 7. Contracts
 
-The dark-pool contracts and the funding/faucet token live and deploy outside this branch (contracts side). The service depends only on their **deployed** package names + the `dark-pool.bootstrap.json` config. A ledger-provisioning script (`canton-barebones/scripts/dark-pool-bootstrap.mjs`) is included for whoever stands the ledger up — it allocates parties, creates the pool + factory, mints seed holdings, and emits that config. (Note: the dark pool settles a token that implements the Splice `AllocationFactory` standard; CIP-56 does not, so a compatible token must be the one deployed.)
+The dark-pool contracts and the funding/faucet token live in [`../contracts/`](../contracts/). The service depends only on their **deployed** package names + the `dark-pool.bootstrap.json` config. A ledger-provisioning script (`backend/scripts/dark-pool-bootstrap.mjs`) stands the ledger up: it allocates parties, creates the pool + factory, mints seed holdings, and emits that config. The dark pool settles a token that implements the Splice `AllocationFactory` standard — that is the `registry-token` package in `../contracts/`.
 
-## 8. Deploy to DigitalOcean
+## 8. Deploy
 
-Same pattern as the deployed `wallet-service` (`157.245.139.105:3010`). Remaining:
-1. `Dockerfile` — copy `../wallet-service/Dockerfile` (multi-stage Node 24), swap the workspace name, `EXPOSE 3020`, `CMD ["node","dist/server.js"]`.
-2. `canton-barebones/docker-compose.dark-pool-service.yaml` — mirror `docker-compose.wallet-service.yaml` (`--env-file`, `3020:3020`, healthcheck `GET /healthz`); add root scripts `dark-pool-service:fivenorth` / `:down`.
-3. Env: `CANTON_JSON_API_URL`, M2M creds (reuse wallet-service's `FIVENORTH_*`), `DARK_POOL_SERVICE_PORT=3020`, `MATCH_INTERVAL_MS=300000`, `CORS_ORIGINS=*`, `DARK_POOL_BOOTSTRAP=<path to mounted config>`.
-4. `docker compose -f canton-barebones/docker-compose.dark-pool-service.yaml --env-file <env> up -d --build`. Secrets via env, never committed.
-
-## 9. Done / missing / continue
-
-**Done:** the full service + 33/33 tests + mock-mode end-to-end. **Missing:** (1) live-ledger end-to-end run (confirm `emptyExtraArgs` + disclosures at first run); (2) Dockerfile + compose (§8); (3) deploy to FiveNorth/DO. **Continue:** point the service at a provisioned ledger (§4), run the integration scenario live, then containerize + deploy.
+- `Dockerfile` — multi-stage Node 24 build, built from the repo root so it uses the shared workspace lockfile. Builds the `@canton-dappbooster/dark-pool-service` workspace, `EXPOSE 3020`, `CMD ["node","dist/server.js"]`.
+- Root `docker-compose.yml` — the `dark-pool-backend` service runs the image (`3020:3020`, healthcheck `GET /healthz`). Driven by `npm run backend:up` / `backend:down` / `backend:logs`. It defaults to mock mode; for a live ledger, override the environment: set `CANTON_JSON_API_URL`, M2M creds (`FIVENORTH_*`) or `CANTON_BACKEND_TOKEN`, `DARK_POOL_BOOTSTRAP=<path to a mounted config>`, and optionally `MATCH_INTERVAL_MS` / `CORS_ORIGINS`. Pass secrets via env or an `--env-file`, never committed.

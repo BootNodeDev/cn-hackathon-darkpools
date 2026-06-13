@@ -74,7 +74,7 @@ Every emitted plan satisfies the on-ledger contract preconditions. A settlement 
 
 ## Mock Mode
 
-`DARK_POOL_MOCK=1` swaps `ledger.ts` for `mockLedger.ts`. The mock maintains an in-memory state seeded from `mock-bootstrap.json`, implements the same ACS query and exercise interface, and runs all 33 tests without a Canton node.
+`DARK_POOL_MOCK=1` swaps `ledger.ts` for `mockLedger.ts`. The mock maintains an in-memory state seeded from `mock-bootstrap.json`, implements the same ACS query and exercise interface, and runs the full 35-test suite without a Canton node.
 
 ## API Surface
 

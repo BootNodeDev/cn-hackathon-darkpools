@@ -1,6 +1,6 @@
 # Dark Pool Service — Engineering Guide & API Reference
 
-For engineering: the design and **the concessions behind it**, **what the matcher does (and doesn't)**, **how the matching cron works** (and how to force it / change its interval), and **how to use every endpoint — with full request/response JSON**. Examples use the mock fixture ids, so they're real against `DARK_POOL_MOCK=1 npm run dev` (`http://localhost:3020`).
+For engineering: the design and **the concessions behind it**, **what the matcher does (and doesn't)**, **how the matching cron works** (and how to force it / change its interval), and **how to use every endpoint — with full request/response JSON**. Examples use the mock fixture ids, so they're real against `npm run backend:dev` (`http://localhost:3020`).
 
 ---
 
@@ -18,7 +18,7 @@ Read these first — they answer most "why is it like this?" questions.
 
 1. **Custodial / co-hosted.** One process holds one ledger token and acts *as* the venue, the token admin, **and every trader**. → the operator is trusted with custody (it can move trader funds); no per-trader keys. Fine for a single-operator demo; **not** trust-minimized.
 2. **No authentication (yet).** Callers pass a `partyId` in plaintext — no session/SIWE/signature. Anyone reaching the API can act as any co-hosted party. → **don't expose publicly as-is.** Auth deferred.
-3. **Only co-hosted parties can place orders.** `POST /orders` acts *as* the party, so it only works for the parties the backend holds (the seeded demo traders). External wallet parties can faucet + read but **can't place** — wallet-signed placement is future work.
+3. **Only co-hosted parties can place orders.** `POST /orders` acts *as* the party, so it works for the parties the backend holds (the seeded demo traders). External wallet parties can faucet + read; placement is co-hosted.
 4. **Single process, single pool.** Matcher runs in-process (not a separate daemon, not HA). One pair in v1.
 5. **No database — in-memory projection.** Live state is polled from the ledger (the **ledger is the source of truth**). Settled **trades are kept in memory and start empty after a restart** (they still exist on-ledger; re-deriving the history isn't implemented). Live state is always correct; only the *trade-history view* is volatile.
 6. **The matcher is greedy, not optimal.** Best-priced/oldest first, one pair per buy per pass. Larger orders re-rest and match over later passes. Deterministic; converges over passes.
@@ -27,7 +27,7 @@ Read these first — they answer most "why is it like this?" questions.
 9. **The matcher never splits orders** — partial fills/remainders are created **on-ledger**; the matcher only picks the pair + fill quantity (`min` of the two sizes).
 10. **Custom token, not CIP-56** — CIP-56 can't be settled by the dark pool (transfer-instruction standard, not the allocation standard the contract uses). We trade a registry token we control.
 11. **Matching is periodic, not on-placement.** Placing doesn't match — the order rests until the next pass (or a manual trigger). Heartbeat defaults to **5 min** (demo: stage, narrate, trigger). Lower it in prod.
-12. **Mock mode exists** — the whole service runs against an in-memory fake ledger; most testing so far is against it, so the live-ledger path is the least-exercised part.
+12. **Mock mode** — the whole service runs against an in-memory fake ledger with a seeded fixture, so the frontend can be developed offline (`DARK_POOL_MOCK=1`).
 
 ---
 
@@ -238,7 +238,7 @@ curl -X PUT http://localhost:3020/venue/schedule -H 'Content-Type: application/j
 
 ## 7. Wiring the frontend
 
-The frontend hides its data behind a `DarkPoolClient` interface with a `MockDarkPoolClient` (`dapp/frontend/src/darkpool/`). Wiring = write an `HttpDarkPoolClient` and swap it in `DarkPoolProvider.tsx`; the responses above already match the client's types. Point it at `VITE_DARK_POOL_API` (default `:3020`); develop against mock mode.
+The frontend fronts its data with a `DarkPoolClient` interface (`frontend/src/darkpool/`). The HTTP client points at `VITE_DARK_POOL_API` (default `:3020`) and the responses below match the client's types one-to-one; a mock client backs offline development. The provider (`DarkPoolProvider.tsx`) selects which client to use.
 
 | Client need | Endpoint |
 | --- | --- |
@@ -278,7 +278,6 @@ const runMatching = () => fetch(`${API}/venue/match`, { method: 'POST' }).then((
 - **Darkness:** `/trade` returns only the caller's orders; the book is `/venue`-only.
 - **Identity:** `/orders` + `DELETE` need a co-hosted (seeded) party; `/faucet` + reads take any partyId.
 - **Placement ≠ match:** order rests until a pass; `POST /venue/match` to settle now.
-- `localhost:3012` blank = frontend connect-wallet gate / wallet-companion on `:3011`, not this API.
 
 ---
 
@@ -286,8 +285,8 @@ const runMatching = () => fetch(`${API}/venue/match`, { method: 'POST' }).then((
 
 ```bash
 # Mock (offline, seeded, live matching) — for frontend dev:
-DARK_POOL_MOCK=1 npm --prefix canton-barebones/dark-pool-service run dev   # → :3020
-# Tests (33/33):
-npm --prefix canton-barebones/dark-pool-service test
+npm run backend:dev          # from the repo root; → :3020
+# Tests (35/35):
+npm --prefix backend test
 ```
-Live-ledger config and DigitalOcean deploy: see `README.md`. Mock fixture ids: `src/mock-bootstrap.json`.
+Live-ledger config and deploy: see [`README.md`](README.md). Mock fixture ids: `src/mock-bootstrap.json`.
