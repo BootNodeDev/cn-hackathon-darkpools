@@ -15,6 +15,10 @@ dist/
 .DS_Store
 npm-debug.log*
 
+# design scratch / generated assets
+design/
+.playwright-mcp/
+
 # IDE
 .idea/
 .vscode/
