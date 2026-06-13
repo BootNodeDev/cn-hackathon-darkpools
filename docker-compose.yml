@@ -1,0 +1,20 @@
+services:
+  dark-pool-backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: dark-pool-backend
+    restart: unless-stopped
+    environment:
+      DARK_POOL_MOCK: "1"
+      DARK_POOL_SERVICE_PORT: "3020"
+      CORS_ORIGINS: "*"
+      MATCH_INTERVAL_MS: "300000"
+    ports:
+      - "3020:3020"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3020/healthz >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s

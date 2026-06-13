@@ -14,6 +14,10 @@
   "scripts": {
     "backend:dev": "npm --prefix backend run dev",
     "backend:test": "npm --prefix backend test",
+    "backend:build": "docker compose build dark-pool-backend",
+    "backend:up": "docker compose up -d --build dark-pool-backend",
+    "backend:down": "docker compose down",
+    "backend:logs": "docker logs -f -n=300 dark-pool-backend",
     "app:dev": "npm --prefix frontend run dev -- --host localhost --port 3012 --strictPort",
     "lint": "biome check",
     "lint:fix": "biome check --write",
