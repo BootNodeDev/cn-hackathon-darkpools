@@ -57,9 +57,11 @@ export const exerciseResult = (events: TxEvent[], choice: string): unknown => {
   return exercised.ExercisedEvent.exerciseResult
 }
 
-const wildcardFilter = { identifierFilter: { WildcardFilter: { includeCreatedEventBlob: false } } }
+const wildcardFilter = {
+  identifierFilter: { WildcardFilter: { value: { includeCreatedEventBlob: false } } },
+}
 const templateFilter = (templateId: string) => ({
-  identifierFilter: { TemplateFilter: { templateId, includeCreatedEventBlob: false } },
+  identifierFilter: { TemplateFilter: { value: { templateId, includeCreatedEventBlob: false } } },
 })
 
 const filtersByParty = (parties: string[], filter: object): Record<string, object> =>

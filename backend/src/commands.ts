@@ -1,10 +1,7 @@
 // Pure JSON command builders for the Ledger API v2. Field names mirror the Daml
 // choice records exactly. Each returns a tagged {CreateCommand|ExerciseCommand}.
-import type { Side } from './types.ts'
-
-const DARK_POOL_TID = '#dark-pool:DarkPool:DarkPool'
-const ORDER_TID = '#dark-pool:DarkPool:Order'
-const REGISTRY_RULES_TID = '#registry-token:RegistryToken:RegistryRules'
+import { TEMPLATE_IDS } from './templateIds.ts'
+import type { InstrumentId, Side } from './types.ts'
 
 // Empty token-standard ExtraArgs; reconcile the exact JSON against
 // splice-api-token-metadata-v1 at the first integration run.
@@ -32,7 +29,7 @@ export interface PlaceOrderArgs {
 
 export const placeOrder = (args: PlaceOrderArgs): ExerciseCommand => ({
   ExerciseCommand: {
-    templateId: DARK_POOL_TID,
+    templateId: TEMPLATE_IDS.darkPool,
     contractId: args.poolCid,
     choice: 'DarkPool_PlaceOrder',
     choiceArgument: {
@@ -49,7 +46,7 @@ export const placeOrder = (args: PlaceOrderArgs): ExerciseCommand => ({
 
 export const cancelOrder = (orderCid: string): ExerciseCommand => ({
   ExerciseCommand: {
-    templateId: ORDER_TID,
+    templateId: TEMPLATE_IDS.order,
     contractId: orderCid,
     choice: 'Order_Cancel',
     choiceArgument: {},
@@ -58,7 +55,7 @@ export const cancelOrder = (orderCid: string): ExerciseCommand => ({
 
 export const rejectOrder = (orderCid: string): ExerciseCommand => ({
   ExerciseCommand: {
-    templateId: ORDER_TID,
+    templateId: TEMPLATE_IDS.order,
     contractId: orderCid,
     choice: 'Order_Reject',
     choiceArgument: {},
@@ -80,7 +77,7 @@ export const match = (args: MatchArgs): ExerciseCommand => {
   const funding = { allocationFactoryCid: args.factoryCid, allocateArgs: emptyExtraArgs }
   return {
     ExerciseCommand: {
-      templateId: DARK_POOL_TID,
+      templateId: TEMPLATE_IDS.darkPool,
       contractId: args.poolCid,
       choice: 'DarkPool_Match',
       choiceArgument: {
@@ -101,16 +98,16 @@ export const match = (args: MatchArgs): ExerciseCommand => {
 
 export interface MintArgs {
   factoryCid: string
-  symbol: string
-  to: string
+  instrumentId: InstrumentId
+  owner: string
   amount: string
 }
 
 export const mint = (args: MintArgs): ExerciseCommand => ({
   ExerciseCommand: {
-    templateId: REGISTRY_RULES_TID,
+    templateId: TEMPLATE_IDS.registry,
     contractId: args.factoryCid,
     choice: 'Mint',
-    choiceArgument: { symbol: args.symbol, to: args.to, amount: args.amount },
+    choiceArgument: { owner: args.owner, instrumentId: args.instrumentId, amount: args.amount },
   },
 })

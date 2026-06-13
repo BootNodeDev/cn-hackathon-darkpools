@@ -4,11 +4,8 @@
 import type { BootstrapConfig } from './config.ts'
 import { parseDec, toDec } from './decimal.ts'
 import type { ActiveContract, Ledger } from './ledger.ts'
+import { TEMPLATE_IDS } from './templateIds.ts'
 import type { Balance, Holding, InstrumentId, OrderContract, Pool, Side, Trade } from './types.ts'
-
-const POOL_TID = '#dark-pool:DarkPool:DarkPool'
-const ORDER_TID = '#dark-pool:DarkPool:Order'
-const HOLDING_TID = '#registry-token:RegistryToken:RegistryHolding'
 
 const instrumentKey = (instrument: InstrumentId): string => `${instrument.admin}:${instrument.id}`
 
@@ -91,10 +88,11 @@ const parseOrder = (contract: ActiveContract): OrderContract => {
 
 const parseHolding = (contract: ActiveContract): Holding => {
   const args = contract.createArgument
+  const instrumentId = args.instrumentId as InstrumentId
   return {
     contractId: contract.contractId,
     owner: String(args.owner),
-    instrument: { admin: String(args.admin), id: String(args.symbol) },
+    instrument: { admin: String(instrumentId.admin), id: String(instrumentId.id) },
     amount: String(args.amount),
   }
 }
@@ -118,9 +116,9 @@ export const createProjection = (ledger: Ledger, config: BootstrapConfig): Proje
   return {
     refresh: async () => {
       const [pools, orders, holdings] = await Promise.all([
-        ledger.activeContracts(config.parties.venue, POOL_TID),
-        ledger.activeContracts(config.parties.venue, ORDER_TID),
-        ledger.activeContracts(config.parties.admin, HOLDING_TID),
+        ledger.activeContracts(config.parties.venue, TEMPLATE_IDS.darkPool),
+        ledger.activeContracts(config.parties.venue, TEMPLATE_IDS.order),
+        ledger.activeContracts(config.parties.admin, TEMPLATE_IDS.registryHolding),
       ])
       state.pools = pools.map(parsePool)
       state.orders = orders.map(parseOrder)

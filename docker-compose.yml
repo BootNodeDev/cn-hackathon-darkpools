@@ -6,10 +6,23 @@ services:
     container_name: dark-pool-backend
     restart: unless-stopped
     environment:
-      DARK_POOL_MOCK: "1"
-      DARK_POOL_SERVICE_PORT: "3020"
-      CORS_ORIGINS: "*"
-      MATCH_INTERVAL_MS: "300000"
+      DARK_POOL_MOCK: "0"
+      DARK_POOL_BOOTSTRAP: "/app/config/dark-pool.bootstrap.json"
+      CANTON_JSON_API_URL: "${CANTON_JSON_API_URL:-https://ledger-api.validator.devnet.sandbox.fivenorth.io}"
+      FIVENORTH_AUTH_URL: "${FIVENORTH_AUTH_URL:-https://auth.sandbox.fivenorth.io/application/o/token/}"
+      FIVENORTH_CLIENT_ID: "${FIVENORTH_CLIENT_ID:-validator-devnet-m2m}"
+      FIVENORTH_CLIENT_SECRET: "${FIVENORTH_CLIENT_SECRET:-}"
+      FIVENORTH_SCOPE: "${FIVENORTH_SCOPE:-daml_ledger_api}"
+      DARK_POOL_SERVICE_PORT: "${DARK_POOL_SERVICE_PORT:-3020}"
+      CORS_ORIGINS: "${CORS_ORIGINS:-https://darkpools.cc/}"
+      MATCH_INTERVAL_MS: "${MATCH_INTERVAL_MS:-150000}"
+    volumes:
+      - type: bind
+        source: ./dark-pool.bootstrap.json
+        target: /app/config/dark-pool.bootstrap.json
+        read_only: true
+        bind:
+          create_host_path: false
     ports:
       - "3020:3020"
     healthcheck:

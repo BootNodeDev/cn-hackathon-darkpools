@@ -1,0 +1,19 @@
+{
+  "parties": {
+    "venue": "darkpools-venue::1220efeb16c920379f761f7cc0c21f3ede5193932bac3cf6b1fd65c775c5067db9e4",
+    "admin": "tokens-admin::1220593c17bbf246ebf115a2848d9476e1ca217eb119b2e8503967606373e163a028"
+  },
+  "poolId": "BNT/USDbn",
+  "instruments": {
+    "base": {
+      "admin": "tokens-admin::1220593c17bbf246ebf115a2848d9476e1ca217eb119b2e8503967606373e163a028",
+      "id": "BNT"
+    },
+    "quote": {
+      "admin": "tokens-admin::1220593c17bbf246ebf115a2848d9476e1ca217eb119b2e8503967606373e163a028",
+      "id": "USDbn"
+    }
+  },
+  "factoryCid": "0052bf500b9f8f6fb9753a1f13c6a8c2622f6fd404deeada2b4aba74af26be76ccca1212200524ff04ea8b19ec57e0fb93f1b91912ae87d486bcfc921bd8b535a4c8aa0091",
+  "poolCid": "00c708ec032b0779a91dc6264074fbcdfb95ec0a421f4376dfe9e6a5a0321f5e1cca121220710f50eb0310bbb6c7170758bfd022e4fde9c17b9bbaa17c7eeddc96807eb877"
+}

@@ -5,10 +5,8 @@
 import type { BootstrapConfig } from './config.ts'
 import { type Dec, fillQuantity, midpointPrice, parseDec, quoteAmount, toDec } from './decimal.ts'
 import type { ActiveContract, Ledger, Transaction, TxEvent } from './ledger.ts'
-
-const POOL_TID = '#dark-pool:DarkPool:DarkPool'
-const ORDER_TID = '#dark-pool:DarkPool:Order'
-const HOLDING_TID = '#registry-token:RegistryToken:RegistryHolding'
+import { TEMPLATE_IDS } from './templateIds.ts'
+import type { InstrumentId } from './types.ts'
 
 type Stored = {
   contractId: string
@@ -29,6 +27,9 @@ type Command = {
 }
 
 const str = (record: Record<string, unknown>, key: string): string => String(record[key])
+
+const instrumentIdOf = (record: Record<string, unknown>): InstrumentId =>
+  record.instrumentId as InstrumentId
 
 const byHoldingAmountDesc = (a: Stored, b: Stored): number => {
   const amountA = parseDec(str(a.createArgument, 'amount'))
@@ -77,9 +78,9 @@ export const createMockLedger = (config: BootstrapConfig): Ledger => {
       .filter(
         (contract) =>
           !contract.archived &&
-          contract.templateId === HOLDING_TID &&
+          contract.templateId === TEMPLATE_IDS.registryHolding &&
           str(contract.createArgument, 'owner') === owner &&
-          str(contract.createArgument, 'symbol') === symbol,
+          instrumentIdOf(contract.createArgument).id === symbol,
       )
       .sort(byHoldingAmountDesc)
 
@@ -97,12 +98,22 @@ export const createMockLedger = (config: BootstrapConfig): Ledger => {
     const change = total - amount
     const changeEvent =
       change > BigInt(0)
-        ? [create(HOLDING_TID, { admin, owner: from, symbol, amount: toDec(change) })]
+        ? [
+            create(TEMPLATE_IDS.registryHolding, {
+              instrumentId: { admin, id: symbol },
+              owner: from,
+              amount: toDec(change),
+            }),
+          ]
         : []
     return [
       ...archives,
       ...changeEvent,
-      create(HOLDING_TID, { admin, owner: to, symbol, amount: toDec(amount) }),
+      create(TEMPLATE_IDS.registryHolding, {
+        instrumentId: { admin, id: symbol },
+        owner: to,
+        amount: toDec(amount),
+      }),
     ]
   }
 
@@ -111,7 +122,7 @@ export const createMockLedger = (config: BootstrapConfig): Ledger => {
     if (pool === undefined) {
       throw new Error(`mock ledger: unknown pool ${poolCid}`)
     }
-    const created = create(ORDER_TID, {
+    const created = create(TEMPLATE_IDS.order, {
       trader: str(args, 'trader'),
       venue: pool.createArgument.venue,
       poolId: pool.createArgument.poolId,
@@ -183,10 +194,9 @@ export const createMockLedger = (config: BootstrapConfig): Ledger => {
   }
 
   const mint = (args: Record<string, unknown>): TxEvent[] => {
-    const created = create(HOLDING_TID, {
-      admin,
-      owner: str(args, 'to'),
-      symbol: str(args, 'symbol'),
+    const created = create(TEMPLATE_IDS.registryHolding, {
+      instrumentId: args.instrumentId,
+      owner: str(args, 'owner'),
       amount: str(args, 'amount'),
     })
     return [
@@ -237,7 +247,7 @@ export const createMockLedger = (config: BootstrapConfig): Ledger => {
   offset += 1
   store.set(config.poolCid, {
     contractId: config.poolCid,
-    templateId: POOL_TID,
+    templateId: TEMPLATE_IDS.darkPool,
     createArgument: {
       venue: config.parties.venue,
       poolId: config.poolId,

@@ -133,10 +133,17 @@ const postFaucet =
       return
     }
     const symbol = instrument ?? ctx.config.instruments.base.id
+    const instrumentId = [ctx.config.instruments.base, ctx.config.instruments.quote].find(
+      (candidate) => candidate.id === symbol,
+    )
+    if (instrumentId === undefined) {
+      res.status(404).json({ error: `unknown instrument ${symbol}` })
+      return
+    }
     const command = mint({
       factoryCid: ctx.config.factoryCid,
-      symbol,
-      to: party,
+      instrumentId,
+      owner: party,
       amount: amount ?? DEFAULT_FAUCET_AMOUNT,
     })
     await ctx.ledger.submit(ctx.config.parties.admin, [command])

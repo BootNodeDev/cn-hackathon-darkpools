@@ -9,16 +9,16 @@ import type { InstrumentId } from './types.ts'
 export type AuthSource = 'static' | 'm2m' | 'mock'
 
 export interface BootstrapConfig {
-  jsonApiUrl: string
-  userId: string
-  parties: { venue: string; admin: string; traders: Record<string, string> }
+  jsonApiUrl?: string
+  parties: { venue: string; admin: string }
   poolId: string
   instruments: { base: InstrumentId; quote: InstrumentId }
   factoryCid: string
   poolCid: string
 }
 
-export interface Config extends BootstrapConfig {
+export interface Config extends Omit<BootstrapConfig, 'jsonApiUrl'> {
+  jsonApiUrl: string
   port: number
   matchIntervalMs: number
   corsOrigins: string[]
@@ -31,11 +31,14 @@ const DEFAULT_MATCH_INTERVAL_MS = 300_000
 const TOKEN_REFRESH_SKEW_MS = 60_000
 const MOCK_FIXTURE = fileURLToPath(new URL('./mock-bootstrap.json', import.meta.url))
 
+// Reads an optional environment variable, treating empty values as unset so
+// docker-compose defaults do not accidentally select an auth or URL mode.
 const optional = (name: string): string | undefined => {
   const value = process.env[name]
   return value === undefined || value === '' ? undefined : value
 }
 
+// Parses positive integer knobs used by the process listener and matcher timer.
 const positiveInt = (name: string, fallback: number): number => {
   const value = optional(name)
   if (value === undefined) {
@@ -48,12 +51,24 @@ const positiveInt = (name: string, fallback: number): number => {
   return parsed
 }
 
+// Enables the self-contained in-memory ledger used for local UI development.
 const isMock = (): boolean => optional('DARK_POOL_MOCK') === '1'
 
+// Loads the deployed contract identifiers emitted by the ledger bootstrap step.
 const readBootstrap = (mock: boolean): BootstrapConfig => {
   const path =
     optional('DARK_POOL_BOOTSTRAP') ?? (mock ? MOCK_FIXTURE : 'daml/dark-pool.bootstrap.json')
   return JSON.parse(readFileSync(path, 'utf8')) as BootstrapConfig
+}
+
+// Resolves the JSON API endpoint from env first, with bootstrap fallback for
+// legacy local files that already include the endpoint.
+const resolveJsonApiUrl = (bootstrap: BootstrapConfig): string => {
+  const jsonApiUrl = optional('CANTON_JSON_API_URL') ?? bootstrap.jsonApiUrl
+  if (jsonApiUrl === undefined) {
+    throw new Error('set CANTON_JSON_API_URL or jsonApiUrl in DARK_POOL_BOOTSTRAP')
+  }
+  return jsonApiUrl
 }
 
 // Static LocalNet token, FiveNorth M2M, or none (mock) — first match wins.
@@ -89,7 +104,7 @@ export const loadConfig = (): Config => {
   const bootstrap = readBootstrap(mock)
   return {
     ...bootstrap,
-    jsonApiUrl: optional('CANTON_JSON_API_URL') ?? bootstrap.jsonApiUrl,
+    jsonApiUrl: resolveJsonApiUrl(bootstrap),
     port: positiveInt('DARK_POOL_SERVICE_PORT', DEFAULT_PORT),
     matchIntervalMs: positiveInt('MATCH_INTERVAL_MS', DEFAULT_MATCH_INTERVAL_MS),
     corsOrigins: (optional('CORS_ORIGINS') ?? '*').split(',').map((origin) => origin.trim()),
