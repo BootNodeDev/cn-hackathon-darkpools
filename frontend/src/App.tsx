@@ -1,38 +1,43 @@
+import { createRouter, RouterProvider } from '@tanstack/react-router'
 import { ConnectKitProvider } from 'canton-connect-kit'
+import { MotionConfig } from 'framer-motion'
 import { useState } from 'react'
 import { ToastProvider } from '@/components/ui/ToastProvider'
 import { TooltipProvider } from '@/components/ui/Tooltip'
+import { DarkPoolProvider } from '@/darkpool/DarkPoolProvider'
 import { ConnectionBar } from './ConnectionBar'
-import { LoyaltyCard } from './features/loyalty/index'
-import { SignMessageDemo } from './features/sign-message/index'
+import { routeTree } from './routeTree.gen'
 import { loadRuntimeConfig } from './runtimeConfig'
 
-const envString = (name: string): string =>
-  ((import.meta.env[name] as string | undefined) ?? '').trim()
+const router = createRouter({ routeTree })
 
-// dApp starter shell. Everything under src/features/<name>/ is a removable demo:
-// to drop one, delete its folder + its import and <…/> line below, plus
-// ../e2e/tests/features/<name>/. See README "Removing a feature".
+declare module '@tanstack/react-router' {
+  interface Register {
+    router: typeof router
+  }
+}
+
 export const App = (): JSX.Element => {
   const [runtimeConfig] = useState(() => loadRuntimeConfig())
-  // /sign-demo serves the standalone signMessage example; every other path is
-  // the Stampbook app. Keeps the off-topic demo out of the product UI while
-  // leaving it reachable (and e2e-testable) on its own route.
-  const isSignDemo = window.location.pathname === '/sign-demo'
   return (
-    <TooltipProvider>
-      <ToastProvider>
-        <ConnectKitProvider
-          config={{
-            appName: 'dAppBooster Canton Stampbook',
-            appDescription: 'On-ledger loyalty stamp cards on Canton',
-            network: runtimeConfig.cantonNetwork,
-            walletConnectProjectId: envString('VITE_WC_PROJECT_ID'),
-          }}
-        >
-          <ConnectionBar>{isSignDemo ? <SignMessageDemo /> : <LoyaltyCard />}</ConnectionBar>
-        </ConnectKitProvider>
-      </ToastProvider>
-    </TooltipProvider>
+    <MotionConfig reducedMotion="user">
+      <TooltipProvider>
+        <ToastProvider>
+          <ConnectKitProvider
+            config={{
+              appName: 'CN Dark Pools',
+              appDescription: 'Private dark-pool trading on Canton Network',
+              network: runtimeConfig.cantonNetwork,
+            }}
+          >
+            <ConnectionBar>
+              <DarkPoolProvider>
+                <RouterProvider router={router} />
+              </DarkPoolProvider>
+            </ConnectionBar>
+          </ConnectKitProvider>
+        </ToastProvider>
+      </TooltipProvider>
+    </MotionConfig>
   )
 }

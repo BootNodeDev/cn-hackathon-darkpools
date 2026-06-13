@@ -1,141 +1,128 @@
 @import "tailwindcss";
+@import "@fontsource-variable/bricolage-grotesque";
+@import "@fontsource-variable/dm-sans";
+@import "@fontsource-variable/geist-mono";
 
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-/* Latin subset only; the app ships English copy. */
-@font-face {
-  font-family: "Manrope Variable";
-  font-style: normal;
-  font-display: swap;
-  font-weight: 200 800;
-  src: url("@fontsource-variable/manrope/files/manrope-latin-wght-normal.woff2")
-    format("woff2-variations");
-  unicode-range:
-    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
-    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-
-@font-face {
-  font-family: "JetBrains Mono Variable";
-  font-style: normal;
-  font-display: swap;
-  font-weight: 100 800;
-  src: url("@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2")
-    format("woff2-variations");
-  unicode-range:
-    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
-    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-
 /*
- * Typography: font-display / font-sans (Manrope) for headings and UI; font-mono
- * (JetBrains Mono) for party IDs, hashes, RPC URLs, JSON, amounts.
+ * Typography: font-display (Bricolage Grotesque, a characterful display sans)
+ * for the brand, section titles and headline numbers; font-sans (DM Sans) for
+ * UI labels and body; font-mono (Geist Mono) for all tabular data.
+ * The clearing/midpoint price gets the gold --color-mid: the one warm note in a
+ * cold abyssal palette, marking the moment that matters.
  */
 
 :root {
   color-scheme: light;
 
-  --color-background: #f7f7f7;
+  --color-background: #eef1f7;
   --color-surface: #ffffff;
-  --color-muted: #ececf0;
+  --color-muted: #e7ecf5;
 
-  --color-border: #e2e2ea;
-  --color-border-strong: #ccccd6;
+  --color-border: #d7deea;
+  --color-border-strong: #c2ccdd;
 
-  --color-foreground: #2c2d40;
-  --color-muted-foreground: #4b4d60;
-  --color-soft: #6b6d80;
+  --color-foreground: #0c1626;
+  --color-muted-foreground: #51607a;
+  --color-soft: #8493a8;
 
-  --color-primary: #692581;
-  --color-primary-hover: #8b46a4;
-  --color-primary-soft: #f3e8f8;
-  --color-primary-ink: #4a1a5c;
+  --color-primary: #2563ff;
+  --color-primary-hover: #1d54e0;
+  --color-primary-soft: #e7eeff;
+  --color-primary-ink: #15307a;
   --color-primary-foreground: #ffffff;
 
-  --logo-shadow-color: rgba(44, 45, 64, 0.5);
+  --logo-shadow-color: rgba(20, 30, 60, 0.4);
 
-  --color-accent: #c670e5;
+  --color-accent: #6c3fff;
 
-  --color-success: #137047;
+  --color-mid: #9a7b32;
+  --color-mid-soft: #f4ecd6;
+
+  --color-success: #0f9d6b;
   --color-success-soft: #e2f3ea;
 
-  --color-danger: #a32626;
-  --color-danger-soft: #f6dede;
+  --color-danger: #d83a4f;
+  --color-danger-soft: #f8dfe2;
 
   --color-warning: #8a6400;
   --color-warning-soft: #f6ecd2;
 
   --color-form-placeholder: #6f7185;
 
-  --color-scrim: rgba(20, 21, 43, 0.42);
+  --color-scrim: rgba(12, 22, 38, 0.42);
 
-  --shadow-card: 0 12px 28px -16px rgba(28, 29, 46, 0.18);
-  --shadow-popover: 0 18px 36px -12px rgba(28, 29, 46, 0.22);
-  --shadow-focus: 0 0 0 3px rgba(105, 37, 129, 0.32);
-  --shadow-focus-danger: 0 0 0 3px rgba(163, 38, 38, 0.32);
-  --shadow-glow: 0 10px 26px rgba(198, 112, 229, 0.4);
+  --shadow-card: 0 12px 28px -18px rgba(20, 30, 60, 0.2);
+  --shadow-popover: 0 18px 40px -14px rgba(20, 30, 60, 0.26);
+  --shadow-focus: 0 0 0 3px rgba(37, 99, 255, 0.3);
+  --shadow-focus-danger: 0 0 0 3px rgba(216, 58, 79, 0.3);
+  --shadow-glow: 0 12px 30px -8px rgba(37, 99, 255, 0.35);
 
-  --bg-gradient-brand: linear-gradient(135deg, #a948c4, #dd1a6e);
+  --bg-gradient-brand: linear-gradient(135deg, #2563ff, #6c3fff);
 
-  --bg-radial: radial-gradient(
-    ellipse 90% 60% at 50% 0%,
-    rgba(105, 37, 129, 0.1) 0%,
-    rgba(231, 29, 115, 0.04) 35%,
-    transparent 70%
-  );
+  --bg-radial:
+    radial-gradient(ellipse 70% 50% at 8% 108%, rgba(37, 99, 255, 0.08), transparent 60%),
+    radial-gradient(900px 500px at 88% -10%, rgba(108, 63, 255, 0.06), transparent 60%);
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --color-background: #14152b;
-  --color-surface: #1c1d2e;
-  --color-muted: #232539;
+  /* three abyssal depth layers: base -> surface -> raised */
+  --color-background: #050810;
+  --color-surface: #0a0f1e;
+  --color-muted: #0f1628;
 
-  --color-border: #2c2e46;
-  --color-border-strong: #5f6178;
+  --color-border: #1a2540;
+  --color-border-strong: #2a3a5e;
 
-  --color-foreground: #fafbfc;
-  --color-muted-foreground: #c5c2cb;
-  --color-soft: #e2e0e7;
+  --color-foreground: #e8edf7;
+  --color-muted-foreground: #8090aa;
+  --color-soft: #56688a;
 
-  --color-primary: #9d54b8;
-  --color-primary-hover: #b06cc9;
-  --color-primary-soft: #2a1f3a;
-  --color-primary-ink: #ecd9f5;
-  --color-primary-foreground: #ffffff;
+  /* bioluminescent blue, not crypto-cyan */
+  --color-primary: #3d7fff;
+  --color-primary-hover: #5b94ff;
+  --color-primary-soft: #0e1a36;
+  --color-primary-ink: #bcd3ff;
+  --color-primary-foreground: #04122e;
 
   --logo-shadow-color: rgba(0, 0, 0, 0.6);
 
-  --color-accent: #c670e5;
+  /* violet-indigo depth shimmer */
+  --color-accent: #6c3fff;
 
-  --color-success: #5fbf86;
-  --color-success-soft: #16291f;
+  /* warm gold: the clearing/midpoint price, the one warm note */
+  --color-mid: #d8b878;
+  --color-mid-soft: #2a2113;
 
-  --color-danger: #e57373;
-  --color-danger-soft: #331a1a;
+  --color-success: #2ecc8f;
+  --color-success-soft: #0f2a20;
 
-  --color-warning: #d4a85a;
-  --color-warning-soft: #332a16;
+  --color-danger: #f0556a;
+  --color-danger-soft: #2a131a;
 
-  --color-form-placeholder: #7a7c92;
+  --color-warning: #d8b878;
+  --color-warning-soft: #2a2113;
 
-  --color-scrim: rgba(8, 8, 18, 0.65);
+  --color-form-placeholder: #56688a;
 
-  --shadow-card: 0 14px 32px -16px rgba(0, 0, 0, 0.55);
-  --shadow-popover: 0 22px 44px -16px rgba(0, 0, 0, 0.7);
-  --shadow-focus: 0 0 0 3px rgba(198, 112, 229, 0.4);
-  --shadow-focus-danger: 0 0 0 3px rgba(229, 115, 115, 0.4);
-  --shadow-glow: 0 10px 26px rgba(198, 112, 229, 0.4);
+  --color-scrim: rgba(3, 5, 12, 0.7);
 
-  --bg-gradient-brand: linear-gradient(135deg, #a948c4, #dd1a6e);
+  --shadow-card: 0 18px 40px -22px rgba(0, 0, 0, 0.8);
+  --shadow-popover: 0 24px 50px -18px rgba(0, 0, 0, 0.85);
+  --shadow-focus: 0 0 0 3px rgba(61, 127, 255, 0.45);
+  --shadow-focus-danger: 0 0 0 3px rgba(240, 85, 106, 0.4);
+  --shadow-glow: 0 0 40px -6px rgba(61, 127, 255, 0.5);
 
-  --bg-radial: radial-gradient(
-    ellipse 90% 60% at 50% 0%,
-    rgba(198, 112, 229, 0.18) 0%,
-    rgba(231, 29, 115, 0.08) 35%,
-    transparent 70%
-  );
+  --bg-gradient-brand: linear-gradient(135deg, #3d7fff, #6c3fff);
+
+  /* abyssal light from far below, faint surface glow above */
+  --bg-radial:
+    radial-gradient(ellipse 90% 55% at -8% 112%, rgba(20, 45, 110, 0.55), transparent 60%),
+    radial-gradient(1100px 520px at 88% -12%, rgba(61, 127, 255, 0.1), transparent 60%),
+    radial-gradient(700px 700px at 50% 50%, rgba(108, 63, 255, 0.04), transparent 70%);
 }
 
 @theme inline {
@@ -161,6 +148,10 @@
   --color-warning-soft: var(--color-warning-soft);
   --color-form-placeholder: var(--color-form-placeholder);
   --color-scrim: var(--color-scrim);
+  --color-up: var(--color-success);
+  --color-down: var(--color-danger);
+  --color-mid: var(--color-mid);
+  --color-mid-soft: var(--color-mid-soft);
 
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -169,9 +160,9 @@
 
   --tracking-eyebrow: 0.1em;
 
-  --font-display: "Manrope Variable", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-sans: "Manrope Variable", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
+  --font-display: "Bricolage Grotesque Variable", "DM Sans Variable", system-ui, sans-serif;
+  --font-sans: "DM Sans Variable", system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, monospace;
 
   --shadow-card: var(--shadow-card);
   --shadow-popover: var(--shadow-popover);
@@ -276,6 +267,25 @@
   }
 }
 
+/* Hidden-liquidity particles in the shielded book: GPU-friendly CSS drift,
+ * per-particle duration/delay/opacity passed as custom properties. */
+.dp-particle {
+  animation: particle-drift var(--dp-dur) ease-in-out infinite;
+  animation-delay: var(--dp-delay);
+}
+
+@keyframes particle-drift {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: var(--dp-o);
+  }
+  50% {
+    transform: translateY(-7px);
+    opacity: calc(var(--dp-o) * 0.55);
+  }
+}
+
 @keyframes drift {
   0%,
   100% {
@@ -360,6 +370,11 @@
   ::selection {
     background-color: var(--color-primary-soft);
     color: var(--color-primary-ink);
+  }
+
+  .tabular,
+  .font-mono {
+    font-variant-numeric: tabular-nums;
   }
 }
 
