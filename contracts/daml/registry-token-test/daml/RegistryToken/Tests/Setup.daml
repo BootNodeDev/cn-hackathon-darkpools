@@ -1,0 +1,64 @@
+-- | Shared fixture for the registry-token suite: one admin-signed Registry, two
+-- demo instruments the admin issues, and helpers to mint, build allocation specs,
+-- and total balances.
+module RegistryToken.Tests.Setup where
+
+import DA.Time
+import Daml.Script
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.HoldingV1
+import Splice.Api.Token.AllocationV1
+import Splice.Testing.Utils
+import RegistryToken.Registry
+import RegistryToken.Holding
+
+data World = World with
+  admin : Party
+  alice : Party
+  bob : Party
+  executor : Party
+  registry : ContractId Registry
+  registryDisc : Disclosures'   -- discloses the admin-signed factory to a sender
+  usdx : InstrumentId
+  eurx : InstrumentId
+
+setup : Script World
+setup = do
+  admin <- allocatePartyExact "rt-admin"
+  alice <- allocatePartyExact "rt-alice"
+  bob <- allocatePartyExact "rt-bob"
+  executor <- allocatePartyExact "rt-executor"
+  registry <- submit admin $ createCmd Registry with admin
+  registryDisc <- queryDisclosure' @Registry admin registry
+  pure World with
+    admin, alice, bob, executor, registry, registryDisc
+    usdx = InstrumentId admin "USDX"
+    eurx = InstrumentId admin "EURX"
+
+-- | Admin mints a holding of `instrumentId` to `owner`; returns the interface cid.
+mint : World -> Party -> InstrumentId -> Decimal -> Script (ContractId Holding)
+mint w owner instrumentId amount =
+  submit w.admin $ exerciseCmd w.registry Mint with owner, instrumentId, amount
+
+-- | Build a standard allocation spec with deadlines around `now`.
+allocSpec : Party -> Party -> Party -> InstrumentId -> Decimal -> Time -> AllocationSpecification
+allocSpec sender receiver executor instrumentId amount now =
+  AllocationSpecification with
+    settlement = SettlementInfo with
+      executor
+      settlementRef = Reference with id = "rt-settle", cid = None
+      requestedAt = addRelTime now (negate (seconds 1))
+      allocateBefore = addRelTime now (minutes 5)
+      settleBefore = addRelTime now (hours 1)
+      meta = emptyMetadata
+    transferLegId = "leg"
+    transferLeg = TransferLeg with
+      sender, receiver, amount, instrumentId, meta = emptyMetadata
+
+-- | Total active balance of a party in an instrument. The query returns every
+-- contract where p is a stakeholder (owner or, when p is the admin, signatory),
+-- so the h.owner == p predicate is needed to exclude admin-stakeholder rows.
+balance : Party -> InstrumentId -> Script Decimal
+balance p instrumentId = do
+  hs <- query @RegistryHolding p
+  pure $ sum [h.amount | (_, h) <- hs, h.owner == p && h.instrumentId == instrumentId]

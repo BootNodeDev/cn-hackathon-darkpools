@@ -1,0 +1,20 @@
+sdk-version: 3.4.11
+name: splice-validator-lifecycle-test
+source: daml
+version: 0.1.7
+dependencies:
+  - daml-prim
+  - daml-stdlib
+  - daml-script
+data-dependencies:
+- ../splice-util/.daml/dist/splice-util-current.dar
+- ../splice-validator-lifecycle/.daml/dist/splice-validator-lifecycle-current.dar
+build-options:
+  - --ghc-option=-Wunused-binds
+  - --ghc-option=-Wunused-matches
+  - --target=2.1
+codegen:
+  java:
+    package-prefix: org.lfdecentralizedtrust.splice.codegen.java
+    decoderClass: org.lfdecentralizedtrust.splice.codegen.java.DecoderSpliceValidatorLifecycleTest
+    output-directory: target/daml-codegen-java

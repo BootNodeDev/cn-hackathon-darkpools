@@ -1,0 +1,119 @@
+-- | Lifecycle and race scenarios for the dark pool: a cancel beating a match,
+-- an expired order that cannot fill (and is garbage-collected via Order_Reject),
+-- an archived pool that pauses matching, and stale funding that fails closed
+-- before the trader cancels and re-places. Each negative case must fail for its
+-- INTENDED reason (cancel/expiry/pool-archive/stale), never a visibility
+-- artifact, so funding disclosures are supplied exactly where a fill actually
+-- fetches a holding (only the stale-2 success reaches that point).
+module DarkPool.Tests.LifecycleTest where
+
+import DA.Assert ((===))
+import DA.Time
+import Daml.Script
+import Splice.Testing.Utils
+import DarkPool
+import DarkPool.Math
+import DarkPool.Tests.Setup
+import DarkPool.Tests.TestToken
+
+-- | Assemble a venue Match command for buyCid x sellCid, with deadlines
+-- recomputed from now (so they survive a passTime shift). Returns only the
+-- registry-rules disclosures: that is enough for every must-fail caller, since
+-- each fails before any funding holding is fetched. The one success path
+-- (stale-2) supplies the augmented disclosure set at its call site.
+fundedMatch : TTFixture -> ContractId Order -> ContractId Order -> Text
+  -> Script (Disclosures', Commands MatchResult)
+fundedMatch f buyCid sellCid matchId = do
+  (requestedAt, allocateBefore, settleBefore) <- matchDeadlines
+  let cmds = exerciseCmd f.poolCid DarkPool_Match with
+        buyOrderCid = buyCid
+        sellOrderCid = sellCid
+        matchId
+        requestedAt
+        allocateBefore
+        settleBefore
+        buyFunding = ttFunding f Buy
+        sellFunding = ttFunding f Sell
+        buyExecuteArgs = emptyExtraArgs
+        sellExecuteArgs = emptyExtraArgs
+  pure (f.rulesDisclosures, cmds)
+
+-- A cancel that lands before the match wins the race: DarkPool_Match fetches
+-- the archived (cancelled) buy order and fails immediately.
+cancelBeatsMatchTest : Script ()
+cancelBeatsMatchTest = do
+  f <- setupTT
+  (aliceQuote, _) <- mintTT f f.alice "TTB" 20.0
+  (bobBase, _) <- mintTT f f.bob "TTA" 10.0
+  buyCid <- placeOrder f f.alice Buy 10.0 2.0 1.0 [aliceQuote]
+  sellCid <- placeOrder f f.bob Sell 10.0 1.0 1.0 [bobBase]
+  submit f.alice $ exerciseCmd buyCid Order_Cancel
+  (ds, cmds) <- fundedMatch f buyCid sellCid "race"
+  submitWithDisclosuresMustFail' f.venue ds cmds
+
+-- An expired order cannot fill: Order_Fill's first assert is the expiry check
+-- (before any holding is fetched), so the match fails closed. The venue then
+-- garbage-collects the dead order via Order_Reject; the trader witnesses it.
+expiryTest : Script ()
+expiryTest = do
+  f <- setupTT
+  now <- getTime
+  (aliceQuote, _) <- mintTT f f.alice "TTB" 20.0
+  (bobBase, _) <- mintTT f f.bob "TTA" 10.0
+  buyCid <- submitWithDisclosures' f.alice f.poolDisclosure $
+    exerciseCmd f.poolCid DarkPool_PlaceOrder with
+      trader = f.alice
+      side = Buy
+      quantity = 10.0
+      limitPrice = 2.0
+      minFill = 1.0
+      expiresAt = Some (addRelTime now (minutes 1))
+      holdingCids = [aliceQuote]
+  sellCid <- placeOrder f f.bob Sell 10.0 1.0 1.0 [bobBase]
+  passTime (minutes 2)
+  (ds, cmds) <- fundedMatch f buyCid sellCid "expired"
+  submitWithDisclosuresMustFail' f.venue ds cmds
+  submit f.venue $ exerciseCmd buyCid Order_Reject
+  None <- queryContractId f.alice buyCid
+  pure ()
+
+-- Archiving the pool pauses matching: the venue exercises Match on the archived
+-- f.poolCid and fails before anything runs. Both resting orders are unaffected.
+archivedPoolTest : Script ()
+archivedPoolTest = do
+  f <- setupTT
+  (aliceQuote, _) <- mintTT f f.alice "TTB" 20.0
+  (bobBase, _) <- mintTT f f.bob "TTA" 10.0
+  buyCid <- placeOrder f f.alice Buy 10.0 2.0 1.0 [aliceQuote]
+  sellCid <- placeOrder f f.bob Sell 10.0 1.0 1.0 [bobBase]
+  submit f.venue $ archiveCmd f.poolCid
+  (ds, cmds) <- fundedMatch f buyCid sellCid "paused"
+  submitWithDisclosuresMustFail' f.venue ds cmds
+  Some _ <- queryContractId f.alice buyCid
+  Some _ <- queryContractId f.bob sellCid
+  pure ()
+
+-- Stale funding fails closed, then the trader recovers by cancel-and-re-place.
+-- stale-1: alice's declared funding holding is archived out from under the
+-- order, so the factory's fetch of the inactive contract fails. Both orders
+-- survive (nothing is locked). alice cancels, re-funds, re-places, and the
+-- fresh order matches: stale-2 is a real success, so its fill legs fetch
+-- alice's fresh funding and bob's funding, both of which must be disclosed.
+staleFundingTest : Script ()
+staleFundingTest = do
+  f <- setupTT
+  (aliceQuote, _) <- mintTT f f.alice "TTB" 20.0
+  (bobBase, bobDisc) <- mintTT f f.bob "TTA" 10.0
+  buyCid <- placeOrder f f.alice Buy 10.0 2.0 1.0 [aliceQuote]
+  sellCid <- placeOrder f f.bob Sell 10.0 1.0 1.0 [bobBase]
+  submit f.ttAdmin $ archiveCmd (fromInterfaceContractId @TestTokenHolding aliceQuote)
+  (ds, cmds) <- fundedMatch f buyCid sellCid "stale-1"
+  submitWithDisclosuresMustFail' f.venue ds cmds
+  Some _ <- queryContractId f.alice buyCid
+  Some _ <- queryContractId f.bob sellCid
+  submit f.alice $ exerciseCmd buyCid Order_Cancel
+  (aliceQuote2, aliceDisc2) <- mintTT f f.alice "TTB" 20.0
+  buyCid2 <- placeOrder f f.alice Buy 10.0 2.0 1.0 [aliceQuote2]
+  (_, cmds2) <- fundedMatch f buyCid2 sellCid "stale-2"
+  result <- submitWithDisclosures' f.venue (f.rulesDisclosures <> aliceDisc2 <> bobDisc) cmds2
+  result.fillQty === 10.0

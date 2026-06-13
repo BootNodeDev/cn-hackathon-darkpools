@@ -1,0 +1,16 @@
+# vendored upstream sources and built harness DARs (recreate with scripts/fetch-dep.sh + scripts/build-harness.sh)
+deps/daml
+.tmp-splice/
+
+# dpm build output
+.daml/
+daml/*/.daml/
+
+# editors / OS noise
+node_modules/
+*.log
+.DS_Store
+.vscode/
+
+# working documents (specs, plans, memory seed): never repo content
+docs/superpowers/

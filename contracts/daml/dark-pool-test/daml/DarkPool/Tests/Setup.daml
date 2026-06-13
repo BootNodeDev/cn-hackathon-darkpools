@@ -1,0 +1,165 @@
+-- | Shared fixture and venue/trader-client simulation helpers. Scripts play
+-- the co-hosted v1 roles faithfully: traders fund first and place orders that
+-- carry the funding holdings (no trader-holding disclosure), and the venue
+-- assembles Match arguments and submits with only the registry-context
+-- disclosures (the factory contracts) attached.
+--
+-- Adaptation (Plan 02): on the single-store IDE ledger a non-stakeholder
+-- cannot exercise or fetch a contract via plain submit. Two artifacts are
+-- handled with disclosures (mirroring FillTest), with no weakening of the
+-- production design or the tests:
+--   * placeOrder discloses the venue-signed pool to the trader (poolDisclosure);
+--   * mintTT returns a disclosure of the trader's funding holding so the venue's
+--     Match submission can let the registry factory fetch it.
+module DarkPool.Tests.Setup where
+
+import DA.Time
+import Daml.Script
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.HoldingV1
+import Splice.Api.Token.AllocationV1
+import Splice.Api.Token.AllocationInstructionV1
+import Splice.Testing.Utils
+import Splice.Testing.Registries.AmuletRegistry qualified as AmuletRegistry
+import Splice.Testing.TokenStandard.RegistryApi qualified as RegistryApi
+import DarkPool
+import DarkPool.Math
+import DarkPool.Tests.TestToken
+
+-- | A TestToken-only world: pool trades base "TTA" against quote "TTB".
+data TTFixture = TTFixture with
+  venue : Party
+  alice : Party    -- the buyer in most tests
+  bob : Party      -- the seller in most tests
+  ttAdmin : Party
+  rulesA : ContractId TestTokenRules   -- registry for TTA (base)
+  rulesB : ContractId TestTokenRules   -- registry for TTB (quote)
+  baseId : InstrumentId
+  quoteId : InstrumentId
+  poolCid : ContractId DarkPool
+  rulesDisclosures : Disclosures'
+  poolDisclosure : Disclosures'
+
+setupTT : Script TTFixture
+setupTT = do
+  venue <- allocatePartyExact "venue"
+  alice <- allocatePartyExact "alice"
+  bob <- allocatePartyExact "bob"
+  ttAdmin <- allocatePartyExact "tt-admin"
+  rulesA <- submit ttAdmin $ createCmd TestTokenRules with admin = ttAdmin, symbol = "TTA"
+  rulesB <- submit ttAdmin $ createCmd TestTokenRules with admin = ttAdmin, symbol = "TTB"
+  dA <- queryDisclosure' @TestTokenRules ttAdmin rulesA
+  dB <- queryDisclosure' @TestTokenRules ttAdmin rulesB
+  let baseId = InstrumentId ttAdmin "TTA"
+  let quoteId = InstrumentId ttAdmin "TTB"
+  poolCid <- submit venue $ createCmd DarkPool with
+    venue, poolId = "TTA-TTB", base = baseId, quote = quoteId, minFillFloor = 1.0
+  -- The trader is not a stakeholder of the venue-signed pool, so it places
+  -- orders against a disclosed pool (the trader acquires it off-ledger from
+  -- the venue in production).
+  poolDisclosure <- queryDisclosure' @DarkPool venue poolCid
+  pure TTFixture with
+    venue, alice, bob, ttAdmin, rulesA, rulesB, baseId, quoteId, poolCid
+    rulesDisclosures = dA <> dB
+    poolDisclosure
+
+-- | Trader client: mint TestToken funding. Returns the interface cid the order
+-- carries and a disclosure of the holding (queried as the OWNER): the venue is
+-- not a stakeholder, so its Match submission needs the holding disclosed for
+-- the registry factory to fetch it.
+mintTT : TTFixture -> Party -> Text -> Decimal -> Script (ContractId Holding, Disclosures')
+mintTT f owner symbol amount = do
+  cid <- submit f.ttAdmin $ createCmd TestTokenHolding with
+    admin = f.ttAdmin, owner, symbol, amount
+  disclosure <- queryDisclosure' @TestTokenHolding owner cid
+  pure (toInterfaceContractId @Holding cid, disclosure)
+
+-- | Place an order through the pool's factory choice, funded by holdingCids.
+placeOrder : TTFixture -> Party -> Side -> Decimal -> Decimal -> Decimal -> [ContractId Holding] -> Script (ContractId Order)
+placeOrder f trader side quantity limitPrice minFill holdingCids =
+  submitWithDisclosures' trader f.poolDisclosure $ exerciseCmd f.poolCid DarkPool_PlaceOrder with
+    trader, side, quantity, limitPrice, minFill, expiresAt = None, holdingCids
+
+-- | TestToken needs no choice context; the holdings come from the order.
+ttFunding : TTFixture -> Side -> FundingArgs
+ttFunding f side = FundingArgs with
+  allocationFactoryCid = toInterfaceContractId @AllocationFactory (case side of
+    Buy -> f.rulesB    -- buyer sends quote (TTB)
+    Sell -> f.rulesA)  -- seller sends base (TTA)
+  allocateArgs = emptyExtraArgs
+
+-- | Total active TestToken balance of a party in a symbol.
+ttBalance : Party -> Text -> Script Decimal
+ttBalance p symbol = do
+  holdings <- query @TestTokenHolding p
+  pure $ sum [h.amount | (_, h) <- holdings, h.owner == p && h.symbol == symbol]
+
+-- | Venue backend: standard deadlines around now.
+matchDeadlines : Script (Time, Time, Time)
+matchDeadlines = do
+  now <- getTime
+  pure ( addRelTime now (negate (seconds 1))
+       , addRelTime now (minutes 5)
+       , addRelTime now (hours 1) )
+
+-- | The CC fixture: pool trades base = Canton Coin (Amulet) against
+-- quote = TestToken "TUSD". Buyer (alice) sends TUSD, seller (bob) sends CC.
+data CCFixture = CCFixture with
+  registry : AmuletRegistry.AmuletRegistry
+  venue : Party
+  alice : Party    -- buyer of CC
+  bob : Party      -- seller of CC
+  ttAdmin : Party
+  ttRules : ContractId TestTokenRules
+  ccId : InstrumentId
+  tusdId : InstrumentId
+  poolCid : ContractId DarkPool
+  ttRulesDisclosure : Disclosures'
+  -- The trader is not a stakeholder of the venue-signed pool, so it places
+  -- orders against a disclosed pool (mirrors TTFixture.poolDisclosure).
+  poolDisclosure : Disclosures'
+
+setupCC : Script CCFixture
+setupCC = do
+  registry <- AmuletRegistry.initialize AmuletRegistry.defaultAmuletRegistryConfig
+  venue <- allocatePartyExact "cc-venue"
+  alice <- allocatePartyExact "cc-alice"
+  bob <- allocatePartyExact "cc-bob"
+  ttAdmin <- allocatePartyExact "cc-tt-admin"
+  ttRules <- submit ttAdmin $ createCmd TestTokenRules with admin = ttAdmin, symbol = "TUSD"
+  ttRulesDisclosure <- queryDisclosure' @TestTokenRules ttAdmin ttRules
+  let ccId = registry.instrumentId
+  let tusdId = InstrumentId ttAdmin "TUSD"
+  poolCid <- submit venue $ createCmd DarkPool with
+    venue, poolId = "CC-TUSD", base = ccId, quote = tusdId, minFillFloor = 1.0
+  poolDisclosure <- queryDisclosure' @DarkPool venue poolCid
+  pure CCFixture with ..
+
+-- | Venue backend: harvest the Amulet factory cid, the choice context (which
+-- doubles as the execute context: same "external-party-config-state" key) and
+-- the registry disclosures. The placeholder allocation is never submitted; the
+-- helper only injects context around whatever arg it is given.
+getAmuletFactoryContext : AmuletRegistry.AmuletRegistry -> Script (ContractId AllocationFactory, ExtraArgs, Disclosures')
+getAmuletFactoryContext registry = do
+  now <- getTime
+  let placeholder = AllocationSpecification with
+        settlement = SettlementInfo with
+          executor = registry.dso
+          settlementRef = Reference with id = "placeholder", cid = None
+          requestedAt = now, allocateBefore = now, settleBefore = now
+          meta = emptyMetadata
+        transferLegId = "placeholder"
+        transferLeg = TransferLeg with
+          sender = registry.dso, receiver = registry.dso, amount = 1.0
+          instrumentId = registry.instrumentId, meta = emptyMetadata
+  enriched <- RegistryApi.getAllocationFactory registry AllocationFactory_Allocate with
+    expectedAdmin = registry.dso
+    allocation = placeholder
+    requestedAt = now
+    inputHoldingCids = []
+    extraArgs = emptyExtraArgs
+  pure (enriched.factoryCid, enriched.arg.extraArgs, enriched.disclosures)
+
+-- | Trader client: tap CC from the faucet.
+tapCC : AmuletRegistry.AmuletRegistry -> Party -> Decimal -> Script (ContractId Holding)
+tapCC registry p amount = AmuletRegistry.tapFaucet registry p amount

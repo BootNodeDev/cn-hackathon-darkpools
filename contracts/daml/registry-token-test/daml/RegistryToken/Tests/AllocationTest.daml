@@ -1,0 +1,87 @@
+module RegistryToken.Tests.AllocationTest where
+
+import DA.Assert ((===))
+import DA.Time (addRelTime, seconds)
+import Daml.Script
+import Splice.Api.Token.AllocationV1
+import Splice.Testing.Utils (emptyExtraArgs)
+import RegistryToken.Allocation
+import RegistryToken.Tests.Setup
+
+-- | Execute transfers the escrowed value to the receiver as a fresh holding.
+allocationExecuteTest : Script ()
+allocationExecuteTest = do
+  w <- setup
+  now <- getTime
+  let spec = allocSpec w.alice w.bob w.executor w.usdx 25.0 now
+  allocCid <- submit (actAs [w.admin, w.alice]) $ createCmd RegistryAllocation with spec
+  res <- submit (actAs [w.executor, w.alice, w.bob]) $
+    exerciseCmd (toInterfaceContractId @Allocation allocCid)
+      Allocation_ExecuteTransfer with extraArgs = emptyExtraArgs
+  length res.receiverHoldingCids === 1
+  bobBal <- balance w.bob w.usdx
+  bobBal === 25.0
+
+-- | Cancel (executor + sender + receiver) returns the value to the sender.
+allocationCancelTest : Script ()
+allocationCancelTest = do
+  w <- setup
+  now <- getTime
+  let spec = allocSpec w.alice w.bob w.executor w.usdx 25.0 now
+  allocCid <- submit (actAs [w.admin, w.alice]) $ createCmd RegistryAllocation with spec
+  res <- submit (actAs [w.executor, w.alice, w.bob]) $
+    exerciseCmd (toInterfaceContractId @Allocation allocCid)
+      Allocation_Cancel with extraArgs = emptyExtraArgs
+  length res.senderHoldingCids === 1
+  aliceBal <- balance w.alice w.usdx
+  aliceBal === 25.0
+
+-- | Withdraw (sender alone) returns the value to the sender.
+allocationWithdrawTest : Script ()
+allocationWithdrawTest = do
+  w <- setup
+  now <- getTime
+  let spec = allocSpec w.alice w.bob w.executor w.usdx 25.0 now
+  allocCid <- submit (actAs [w.admin, w.alice]) $ createCmd RegistryAllocation with spec
+  res <- submit w.alice $
+    exerciseCmd (toInterfaceContractId @Allocation allocCid)
+      Allocation_Withdraw with extraArgs = emptyExtraArgs
+  length res.senderHoldingCids === 1
+  aliceBal <- balance w.alice w.usdx
+  aliceBal === 25.0
+
+-- | Execute after the settleBefore deadline has passed is rejected.
+allocationExecuteExpiredFails : Script ()
+allocationExecuteExpiredFails = do
+  w <- setup
+  now <- getTime
+  let base = allocSpec w.alice w.bob w.executor w.usdx 25.0 now
+  let spec = base with
+        settlement = base.settlement with settleBefore = addRelTime now (negate (seconds 1))
+  allocCid <- submit (actAs [w.admin, w.alice]) $ createCmd RegistryAllocation with spec
+  submitMustFail (actAs [w.executor, w.alice, w.bob]) $
+    exerciseCmd (toInterfaceContractId @Allocation allocCid)
+      Allocation_ExecuteTransfer with extraArgs = emptyExtraArgs
+
+-- | Cancel requires executor + sender + receiver; the executor acting alone is
+-- rejected (the executor is an observer, so this fails on authorization).
+allocationCancelInsufficientAuthFails : Script ()
+allocationCancelInsufficientAuthFails = do
+  w <- setup
+  now <- getTime
+  let spec = allocSpec w.alice w.bob w.executor w.usdx 25.0 now
+  allocCid <- submit (actAs [w.admin, w.alice]) $ createCmd RegistryAllocation with spec
+  submitMustFail w.executor $
+    exerciseCmd (toInterfaceContractId @Allocation allocCid)
+      Allocation_Cancel with extraArgs = emptyExtraArgs
+
+-- | Withdraw is the sender's alone; a non-sender (the executor) is rejected.
+allocationWithdrawNonSenderFails : Script ()
+allocationWithdrawNonSenderFails = do
+  w <- setup
+  now <- getTime
+  let spec = allocSpec w.alice w.bob w.executor w.usdx 25.0 now
+  allocCid <- submit (actAs [w.admin, w.alice]) $ createCmd RegistryAllocation with spec
+  submitMustFail w.executor $
+    exerciseCmd (toInterfaceContractId @Allocation allocCid)
+      Allocation_Withdraw with extraArgs = emptyExtraArgs

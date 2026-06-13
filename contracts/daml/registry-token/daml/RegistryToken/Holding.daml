@@ -1,0 +1,25 @@
+-- | Production minimal-registry holding. One generic template keyed on the full
+-- InstrumentId, so a single admin party can issue many instruments. Admin-signed;
+-- the owner is an observer (custodial co-hosted v1: no per-owner key custody).
+module RegistryToken.Holding where
+
+import Splice.Api.Token.MetadataV1 (emptyMetadata)
+import Splice.Api.Token.HoldingV1
+
+template RegistryHolding
+  with
+    instrumentId : InstrumentId
+    owner : Party
+    amount : Decimal
+  where
+    signatory instrumentId.admin
+    observer owner
+    ensure amount > 0.0
+
+    interface instance Holding for RegistryHolding where
+      view = HoldingView with
+        owner
+        instrumentId
+        amount
+        lock = None
+        meta = emptyMetadata

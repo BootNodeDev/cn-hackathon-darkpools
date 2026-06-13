@@ -1,0 +1,33 @@
+module RegistryToken.Tests.HoldingTest where
+
+import DA.Assert ((===))
+import Daml.Script
+import Splice.Api.Token.HoldingV1
+import Splice.Testing.Utils (allocatePartyExact)
+import RegistryToken.Holding
+
+-- | A minted-equivalent holding round-trips its fields and its HoldingV1 view,
+-- and the `ensure` rejects non-positive amounts.
+holdingViewTest : Script ()
+holdingViewTest = do
+  admin <- allocatePartyExact "rt-admin"
+  alice <- allocatePartyExact "rt-alice"
+  let usdx = InstrumentId admin "USDX"
+  cid <- submit admin $ createCmd RegistryHolding with
+    instrumentId = usdx, owner = alice, amount = 30.0
+  -- concrete fields (alice is an observer, so she can see it)
+  [(_, h)] <- query @RegistryHolding alice
+  h.instrumentId === usdx
+  h.owner === alice
+  h.amount === 30.0
+  -- the HoldingV1 interface view projects the same data
+  Some hv <- queryInterfaceContractId @Holding alice (toInterfaceContractId @Holding cid)
+  hv.owner === alice
+  hv.instrumentId === usdx
+  hv.amount === 30.0
+  hv.lock === None
+  -- non-positive amounts are rejected by `ensure`
+  submitMustFail admin $ createCmd RegistryHolding with
+    instrumentId = usdx, owner = alice, amount = 0.0
+  submitMustFail admin $ createCmd RegistryHolding with
+    instrumentId = usdx, owner = alice, amount = -1.0

@@ -1,0 +1,20 @@
+sdk-version: 3.4.11
+name: splitwell-test
+source: daml
+version: 0.1.24
+dependencies:
+  - daml-prim
+  - daml-stdlib
+  - daml-script
+data-dependencies:
+  - ../splice-amulet/.daml/dist/splice-amulet-current.dar
+  - ../splice-amulet-test/.daml/dist/splice-amulet-test-current.dar
+  - ../splice-util/.daml/dist/splice-util-current.dar
+  - ../splitwell/.daml/dist/splitwell-current.dar
+  - ../splice-wallet-payments/.daml/dist/splice-wallet-payments-current.dar
+  - ../splice-wallet/.daml/dist/splice-wallet-current.dar
+  - ../splice-wallet-test/.daml/dist/splice-wallet-test-current.dar
+build-options:
+  - --ghc-option=-Wunused-binds
+  - --ghc-option=-Wunused-matches
+  - --target=2.1

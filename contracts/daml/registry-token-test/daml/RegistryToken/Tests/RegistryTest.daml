@@ -1,0 +1,24 @@
+-- | Tests for the Registry factory: Mint happy path and wrong-admin rejection.
+module RegistryToken.Tests.RegistryTest where
+
+import DA.Assert ((===))
+import Daml.Script
+import Splice.Api.Token.HoldingV1
+import RegistryToken.Registry
+import RegistryToken.Tests.Setup
+
+-- | The admin faucet mints a holding of an instrument it issues.
+mintTest : Script ()
+mintTest = do
+  w <- setup
+  _ <- mint w w.alice w.usdx 100.0
+  bal <- balance w.alice w.usdx
+  bal === 100.0
+
+-- | Minting an instrument whose admin is NOT this registry's admin is rejected.
+mintWrongAdminFails : Script ()
+mintWrongAdminFails = do
+  w <- setup
+  let foreign = InstrumentId w.bob "USDX"   -- bob is not the registry admin
+  submitMustFail w.admin $ exerciseCmd w.registry Mint with
+    owner = w.alice, instrumentId = foreign, amount = 10.0

@@ -1,0 +1,15 @@
+# Multi-package workspace for the cc-dark-pool repo.
+#
+# The `daml/` directory is a CONTAINER of packages (mirroring the upstream
+# canton-network/splice `daml/` layout), not a package itself:
+#
+#   daml/dark-pool/        production templates + pure math   (name: dark-pool)
+#   daml/dark-pool-test/   integration-test package           (name: dark-pool-test)
+#
+# Build each package in its own dpm invocation (see package.json); a bare
+# `dpm build` at the repo root fails because the root is not a package.
+packages:
+  - ./daml/dark-pool
+  - ./daml/dark-pool-test
+  - ./daml/registry-token
+  - ./daml/registry-token-test

@@ -1,0 +1,113 @@
+-- | Production minimal-registry factory. A single admin-signed contract that
+-- mints holdings for any instrument the admin issues and (Tasks 5-6) implements
+-- the token-standard AllocationFactory and TransferFactory for those instruments.
+-- One Registry per admin party serves every instrument whose InstrumentId.admin
+-- is that admin. The choice contexts are trivial (emptyExtraArgs); that is what
+-- lets a backend self-serve a registry API with no external Scan.
+module RegistryToken.Registry where
+
+import DA.Foldable (forA_)
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.HoldingV1
+import Splice.Api.Token.AllocationV1
+import Splice.Api.Token.AllocationInstructionV1
+import Splice.Api.Token.TransferInstructionV1
+import RegistryToken.Holding (RegistryHolding(..))
+import RegistryToken.Allocation (RegistryAllocation(..))
+
+-- | Spend the sender's input holdings to fund one transfer leg of `amount` for
+-- `instrumentId`. Fetches and validates every input (each must be this
+-- instrument and the sender's), archives all of them so duplicate spends contend
+-- on the holdings, asserts the total covers the amount, and mints the sender's
+-- change holding. Returns the change holding cids (empty when the inputs exactly
+-- fund the amount). The AllocationFactory and TransferFactory share this so the
+-- value-conservation math (archive inputs, change = total - amount) lives in one
+-- place.
+spendHoldings : [ContractId Holding] -> InstrumentId -> Party -> Decimal -> Update [ContractId Holding]
+spendHoldings inputHoldingCids instrumentId sender amount = do
+  holdings <- forA inputHoldingCids $ \cid -> do
+    let tcid = fromInterfaceContractId @RegistryHolding cid
+    h <- fetch tcid
+    assertMsg "Registry: holding is this instrument and the sender's"
+      (h.instrumentId == instrumentId && h.owner == sender)
+    pure (tcid, h)
+  forA_ holdings $ \(tcid, _) -> archive tcid
+  let total = sum (map (\(_, h) -> h.amount) holdings)
+  assertMsg "Registry: sufficient funding" (total >= amount)
+  if total > amount
+    then do
+      changeCid <- create RegistryHolding with
+        instrumentId, owner = sender, amount = total - amount
+      pure [toInterfaceContractId @Holding changeCid]
+    else pure []
+
+template Registry
+  with
+    admin : Party
+  where
+    signatory admin
+
+    -- | Admin-only faucet: mint a holding of any instrument this admin issues.
+    nonconsuming choice Mint : ContractId Holding
+      with
+        owner : Party
+        instrumentId : InstrumentId
+        amount : Decimal
+      controller admin
+      do
+        assertMsg "Registry: instrument issued by this admin" (instrumentId.admin == admin)
+        assertMsg "Registry: positive mint amount" (amount > 0.0)
+        cid <- create RegistryHolding with instrumentId, owner, amount
+        pure (toInterfaceContractId @Holding cid)
+
+    interface instance AllocationFactory for Registry where
+      view = AllocationFactoryView with admin, meta = emptyMetadata
+
+      allocationFactory_allocateImpl _self arg = do
+        now <- getTime
+        let spec = arg.allocation
+        let leg = spec.transferLeg
+        assertMsg "Registry: expectedAdmin matches" (arg.expectedAdmin == admin)
+        assertMsg "Registry: instrument issued by this admin" (leg.instrumentId.admin == admin)
+        assertMsg "Registry: positive amount" (leg.amount > 0.0)
+        assertMsg "Registry: requestedAt in the past" (arg.requestedAt <= now)
+        assertMsg "Registry: allocateBefore in the future" (now < spec.settlement.allocateBefore)
+        assertMsg "Registry: deadlines ordered"
+          (spec.settlement.allocateBefore <= spec.settlement.settleBefore)
+        assertMsg "Registry: at least one funding holding" (not (null arg.inputHoldingCids))
+        senderChangeCids <- spendHoldings arg.inputHoldingCids leg.instrumentId leg.sender leg.amount
+        allocCid <- create RegistryAllocation with spec
+        pure AllocationInstructionResult with
+          output = AllocationInstructionResult_Completed with
+            allocationCid = toInterfaceContractId @Allocation allocCid
+          senderChangeCids
+          meta = emptyMetadata
+
+      allocationFactory_publicFetchImpl _self arg = do
+        assertMsg "Registry: expectedAdmin matches" (arg.expectedAdmin == admin)
+        pure AllocationFactoryView with admin, meta = emptyMetadata
+
+    interface instance TransferFactory for Registry where
+      view = TransferFactoryView with admin, meta = emptyMetadata
+
+      transferFactory_transferImpl _self arg = do
+        now <- getTime
+        let t = arg.transfer
+        assertMsg "Registry: expectedAdmin matches" (arg.expectedAdmin == admin)
+        assertMsg "Registry: instrument issued by this admin" (t.instrumentId.admin == admin)
+        assertMsg "Registry: positive amount" (t.amount > 0.0)
+        assertMsg "Registry: requestedAt in the past" (t.requestedAt <= now)
+        assertMsg "Registry: executeBefore in the future" (now < t.executeBefore)
+        assertMsg "Registry: at least one funding holding" (not (null t.inputHoldingCids))
+        senderChangeCids <- spendHoldings t.inputHoldingCids t.instrumentId t.sender t.amount
+        receiverCid <- create RegistryHolding with
+          instrumentId = t.instrumentId, owner = t.receiver, amount = t.amount
+        pure TransferInstructionResult with
+          output = TransferInstructionResult_Completed with
+            receiverHoldingCids = [toInterfaceContractId @Holding receiverCid]
+          senderChangeCids
+          meta = emptyMetadata
+
+      transferFactory_publicFetchImpl _self arg = do
+        assertMsg "Registry: expectedAdmin matches" (arg.expectedAdmin == admin)
+        pure TransferFactoryView with admin, meta = emptyMetadata

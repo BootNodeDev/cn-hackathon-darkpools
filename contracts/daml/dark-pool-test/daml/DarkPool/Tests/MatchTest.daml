@@ -1,0 +1,283 @@
+module DarkPool.Tests.MatchTest where
+
+import DA.Assert ((===))
+import Daml.Script
+import Splice.Testing.Utils
+import Splice.Testing.TokenStandard.WalletClient qualified as WalletClient
+import Splice.Api.Token.HoldingV1 (Holding)
+import Splice.Api.Token.AllocationInstructionV1 (AllocationFactory)
+import Splice.Amulet (Amulet)
+import DarkPool
+import DarkPool.Math
+import DarkPool.Tests.Setup
+import DarkPool.Tests.TestToken
+
+-- Full fill, TestToken vs TestToken. alice buys 10 TTA at limit 2.0; bob
+-- sells 10 TTA at limit 1.0. Midpoint = 1.5; alice pays 15 TTB, bob delivers
+-- 10 TTA.
+ttFullFillTest : Script ()
+ttFullFillTest = do
+  f <- setupTT
+  -- trader clients fund first, then place orders carrying the funding:
+  -- alice needs up to 10*2.0=20 TTB (worst case), bob 10 TTA
+  (aliceQuote, aliceDisc) <- mintTT f f.alice "TTB" 20.0
+  (bobBase, bobDisc) <- mintTT f f.bob "TTA" 10.0
+  buyCid <- placeOrder f f.alice Buy 10.0 2.0 1.0 [aliceQuote]
+  sellCid <- placeOrder f f.bob Sell 10.0 1.0 1.0 [bobBase]
+  (requestedAt, allocateBefore, settleBefore) <- matchDeadlines
+  -- the venue's Match submission drives both Order_Fill legs, whose factories
+  -- fetch each trader's funding holding; disclose both holdings (plus rules).
+  result <- submitWithDisclosures' f.venue (f.rulesDisclosures <> aliceDisc <> bobDisc) $
+    exerciseCmd f.poolCid DarkPool_Match with
+      buyOrderCid = buyCid
+      sellOrderCid = sellCid
+      matchId = "m1"
+      requestedAt, allocateBefore, settleBefore
+      buyFunding = ttFunding f Buy
+      sellFunding = ttFunding f Sell
+      buyExecuteArgs = emptyExtraArgs
+      sellExecuteArgs = emptyExtraArgs
+  result.execPrice === 1.5
+  result.fillQty === 10.0
+  result.buyRemainderCid === None
+  result.sellRemainderCid === None
+  -- each leg's settlement result is plumbed through: every TestToken transfer
+  -- delivers the sent amount to its receiver as exactly one new holding
+  length result.buyLegResult.receiverHoldingCids === 1
+  length result.sellLegResult.receiverHoldingCids === 1
+  -- both orders consumed
+  None <- queryContractId f.alice buyCid
+  None <- queryContractId f.bob sellCid
+  -- balances: alice got 10 TTA, paid 15 of her 20 TTB (5 change)
+  aliceBase <- ttBalance f.alice "TTA"
+  aliceQuoteBal <- ttBalance f.alice "TTB"
+  bobBase' <- ttBalance f.bob "TTA"
+  bobQuote <- ttBalance f.bob "TTB"
+  aliceBase === 10.0
+  aliceQuoteBal === 5.0
+  bobBase' === 0.0
+  bobQuote === 15.0
+
+-- Partial fill with remainder, then a second fill against the remainder. The
+-- remainder is self-funded by its change holding (the v1 invariant), so the
+-- trader is never re-funded between fills.
+ttPartialThenSecondFillTest : Script ()
+ttPartialThenSecondFillTest = do
+  f <- setupTT
+  -- alice wants 10, bob only sells 4: fill 4, alice's remainder 6 re-rests
+  (aliceQuote, aliceDisc) <- mintTT f f.alice "TTB" 20.0
+  (bobBase, bobDisc) <- mintTT f f.bob "TTA" 4.0
+  buyCid <- placeOrder f f.alice Buy 10.0 2.0 2.0 [aliceQuote]
+  sellCid <- placeOrder f f.bob Sell 4.0 1.0 1.0 [bobBase]
+  (requestedAt, allocateBefore, settleBefore) <- matchDeadlines
+  result <- submitWithDisclosures' f.venue (f.rulesDisclosures <> aliceDisc <> bobDisc) $
+    exerciseCmd f.poolCid DarkPool_Match with
+      buyOrderCid = buyCid
+      sellOrderCid = sellCid
+      matchId = "m1"
+      requestedAt, allocateBefore, settleBefore
+      buyFunding = ttFunding f Buy
+      sellFunding = ttFunding f Sell
+      buyExecuteArgs = emptyExtraArgs
+      sellExecuteArgs = emptyExtraArgs
+  result.fillQty === 4.0
+  result.execPrice === 1.5
+  Some remainderCid <- pure result.buyRemainderCid
+  result.sellRemainderCid === None
+  Some remainder <- queryContractId f.alice remainderCid
+  remainder.quantity === 6.0
+  -- alice paid 6 TTB; her 14 change came back as a NEW holding, and the
+  -- remainder already carries it (holdingCids = senderChangeCids). No
+  -- re-funding, no re-disclosure: the remainder is self-funded by construction.
+  aliceQuoteBal <- ttBalance f.alice "TTB"
+  aliceQuoteBal === 14.0
+  length remainder.holdingCids === 1
+  -- a second seller crosses the remainder; alice is never re-funded. The
+  -- remainder's change-holding funding was created inside the venue's first
+  -- Match transaction, but the venue only WITNESSED it there (divulgence, not
+  -- disclosure), so the second venue submission must re-disclose it for the
+  -- factory to fetch; carol's freshly minted base holding likewise.
+  carol <- allocatePartyExact "carol"
+  (carolBase, carolDisc) <- mintTT f carol "TTA" 6.0
+  sell2Cid <- placeOrder f carol Sell 6.0 1.0 1.0 [carolBase]
+  [aliceChangeCid] <- pure remainder.holdingCids
+  aliceChangeDisc <- queryDisclosure' @TestTokenHolding f.alice
+    (fromInterfaceContractId @TestTokenHolding aliceChangeCid)
+  (requestedAt2, allocateBefore2, settleBefore2) <- matchDeadlines
+  result2 <- submitWithDisclosures' f.venue (f.rulesDisclosures <> carolDisc <> aliceChangeDisc) $
+    exerciseCmd f.poolCid DarkPool_Match with
+      buyOrderCid = remainderCid
+      sellOrderCid = sell2Cid
+      matchId = "m2"
+      requestedAt = requestedAt2
+      allocateBefore = allocateBefore2
+      settleBefore = settleBefore2
+      buyFunding = ttFunding f Buy
+      sellFunding = ttFunding f Sell
+      buyExecuteArgs = emptyExtraArgs
+      sellExecuteArgs = emptyExtraArgs
+  result2.fillQty === 6.0
+  result2.buyRemainderCid === None
+  aliceBase <- ttBalance f.alice "TTA"
+  aliceBase === 10.0
+
+-- Sell-side mirror of the partial-fill case: the SELLER is the larger order,
+-- so the remainder rests on the sell side and self-funds from its base change
+-- holding. bob sells 10, alice only buys 4: fill 4, bob's remainder 6 re-rests
+-- and a second buyer (carol) crosses it. The seller's send is raw base (no
+-- rounding), a distinct funding path from the buyer's rounded-quote send.
+ttSellRemainderThenSecondFillTest : Script ()
+ttSellRemainderThenSecondFillTest = do
+  f <- setupTT
+  -- bob sells 10 TTA (funds 10), alice buys 4 (funds worst case 4*2.0=8 TTB)
+  (bobBase, bobDisc) <- mintTT f f.bob "TTA" 10.0
+  (aliceQuote, aliceDisc) <- mintTT f f.alice "TTB" 8.0
+  buyCid <- placeOrder f f.alice Buy 4.0 2.0 1.0 [aliceQuote]
+  sellCid <- placeOrder f f.bob Sell 10.0 1.0 2.0 [bobBase]
+  (requestedAt, allocateBefore, settleBefore) <- matchDeadlines
+  result <- submitWithDisclosures' f.venue (f.rulesDisclosures <> aliceDisc <> bobDisc) $
+    exerciseCmd f.poolCid DarkPool_Match with
+      buyOrderCid = buyCid
+      sellOrderCid = sellCid
+      matchId = "m1"
+      requestedAt, allocateBefore, settleBefore
+      buyFunding = ttFunding f Buy
+      sellFunding = ttFunding f Sell
+      buyExecuteArgs = emptyExtraArgs
+      sellExecuteArgs = emptyExtraArgs
+  result.fillQty === 4.0
+  result.execPrice === 1.5
+  result.buyRemainderCid === None
+  Some remainderCid <- pure result.sellRemainderCid
+  Some remainder <- queryContractId f.bob remainderCid
+  remainder.quantity === 6.0
+  -- bob sent 4 of his 10 TTA; the 6 TTA change came back as a NEW holding, and
+  -- the remainder already carries it (holdingCids = senderChangeCids). The
+  -- seller's funding requirement is the raw remaining quantity, so the change
+  -- holding funds the remainder exactly: self-funded by construction.
+  bobBaseBal <- ttBalance f.bob "TTA"
+  bobBaseBal === 6.0
+  length remainder.holdingCids === 1
+  -- a second buyer crosses the remainder; bob is never re-funded. As in the
+  -- buy-side case, the change holding was created inside the venue's first
+  -- Match transaction, so the venue only WITNESSED it (divulgence, not
+  -- disclosure) and the second submission must re-disclose it.
+  carol <- allocatePartyExact "carol"
+  (carolQuote, carolDisc) <- mintTT f carol "TTB" 12.0
+  buy2Cid <- placeOrder f carol Buy 6.0 2.0 1.0 [carolQuote]
+  [bobChangeCid] <- pure remainder.holdingCids
+  bobChangeDisc <- queryDisclosure' @TestTokenHolding f.bob
+    (fromInterfaceContractId @TestTokenHolding bobChangeCid)
+  (requestedAt2, allocateBefore2, settleBefore2) <- matchDeadlines
+  result2 <- submitWithDisclosures' f.venue (f.rulesDisclosures <> carolDisc <> bobChangeDisc) $
+    exerciseCmd f.poolCid DarkPool_Match with
+      buyOrderCid = buy2Cid
+      sellOrderCid = remainderCid
+      matchId = "m2"
+      requestedAt = requestedAt2
+      allocateBefore = allocateBefore2
+      settleBefore = settleBefore2
+      buyFunding = ttFunding f Buy
+      sellFunding = ttFunding f Sell
+      buyExecuteArgs = emptyExtraArgs
+      sellExecuteArgs = emptyExtraArgs
+  result2.fillQty === 6.0
+  result2.sellRemainderCid === None
+  -- bob delivered all 10 TTA and collected 6 (alice) + 9 (carol) = 15 TTB
+  bobBaseFinal <- ttBalance f.bob "TTA"
+  bobBaseFinal === 0.0
+  bobQuote <- ttBalance f.bob "TTB"
+  bobQuote === 15.0
+
+-- Full fill across two registries: alice buys 10 CC paying TUSD; bob sells
+-- 10 CC. Limits 2.0/1.0, midpoint 1.5: alice pays 15 TUSD, bob delivers 10 CC.
+ccFullFillTest : Script ()
+ccFullFillTest = do
+  f <- setupCC
+  -- trader clients fund first: alice 20 TUSD (worst case), bob 10 CC
+  aliceTusd <- submit f.ttAdmin $ createCmd TestTokenHolding with
+    admin = f.ttAdmin, owner = f.alice, symbol = "TUSD", amount = 20.0
+  bobCC <- tapCC f.registry f.bob 10.0
+  -- place orders carrying the funding (buyer funds in TUSD, seller in CC),
+  -- against the disclosed pool (the trader is not a pool stakeholder)
+  buyCid <- submitWithDisclosures' f.alice f.poolDisclosure $
+    exerciseCmd f.poolCid DarkPool_PlaceOrder with
+      trader = f.alice, side = Buy, quantity = 10.0, limitPrice = 2.0, minFill = 1.0
+      expiresAt = None, holdingCids = [toInterfaceContractId @Holding aliceTusd]
+  sellCid <- submitWithDisclosures' f.bob f.poolDisclosure $
+    exerciseCmd f.poolCid DarkPool_PlaceOrder with
+      trader = f.bob, side = Sell, quantity = 10.0, limitPrice = 1.0, minFill = 1.0
+      expiresAt = None, holdingCids = [bobCC]
+  -- venue backend: amulet factory + context (also the execute context)
+  (ccFactory, ccArgs, ccDisclosures) <- getAmuletFactoryContext f.registry
+  (requestedAt, allocateBefore, settleBefore) <- matchDeadlines
+  -- the venue's Match drives both Order_Fill legs, whose registry factories
+  -- fetch each trader's funding holding. On the single-store IDE ledger the
+  -- venue is not a stakeholder of either holding, so both must be disclosed
+  -- (a Script-harness artifact: it does not model co-hosting as cross-party
+  -- visibility; NOT a design change).
+  aliceTusdDisc <- queryDisclosure' @TestTokenHolding f.alice aliceTusd
+  bobCCDisc <- queryDisclosure' @Amulet f.bob (coerceContractId bobCC)
+  result <- submitWithDisclosures' f.venue
+    (f.ttRulesDisclosure <> ccDisclosures <> aliceTusdDisc <> bobCCDisc) $
+    exerciseCmd f.poolCid DarkPool_Match with
+      buyOrderCid = buyCid, sellOrderCid = sellCid, matchId = "cc-m1"
+      requestedAt, allocateBefore, settleBefore
+      buyFunding = FundingArgs with
+        allocationFactoryCid = toInterfaceContractId @AllocationFactory f.ttRules
+        allocateArgs = emptyExtraArgs
+      sellFunding = FundingArgs with
+        allocationFactoryCid = ccFactory
+        allocateArgs = ccArgs
+      buyExecuteArgs = emptyExtraArgs     -- TestToken leg needs no context
+      sellExecuteArgs = ccArgs            -- Amulet leg reuses the config-state context
+  result.execPrice === 1.5
+  result.fillQty === 10.0
+  -- alice received 10 CC; bob received 15 TUSD; alice kept 5 TUSD change
+  WalletClient.checkBalanceApprox f.alice f.registry.instrumentId 10.0
+  bobTusd <- ttBalance f.bob "TUSD"
+  bobTusd === 15.0
+  aliceTusdBal <- ttBalance f.alice "TUSD"
+  aliceTusdBal === 5.0
+  -- bob's CC is fully spent (faucet gave exactly 10)
+  WalletClient.checkBalanceApprox f.bob f.registry.instrumentId 0.0
+
+-- Rounding pinned end to end: limits 2.0 and 0.3333333333, quantities 1.0.
+-- Midpoint is 1.1666666666 (floored from 1.16666666665); buyer pays
+-- quoteAmount 1.0 * 1.1666666666 = 1.1666666666 TUSD.
+ccBuyerSendsExactRoundingTest : Script ()
+ccBuyerSendsExactRoundingTest = do
+  f <- setupCC
+  aliceTusd <- submit f.ttAdmin $ createCmd TestTokenHolding with
+    admin = f.ttAdmin, owner = f.alice, symbol = "TUSD", amount = 2.0
+  bobCC <- tapCC f.registry f.bob 1.0
+  buyCid <- submitWithDisclosures' f.alice f.poolDisclosure $
+    exerciseCmd f.poolCid DarkPool_PlaceOrder with
+      trader = f.alice, side = Buy, quantity = 1.0, limitPrice = 2.0, minFill = 1.0
+      expiresAt = None, holdingCids = [toInterfaceContractId @Holding aliceTusd]
+  sellCid <- submitWithDisclosures' f.bob f.poolDisclosure $
+    exerciseCmd f.poolCid DarkPool_PlaceOrder with
+      trader = f.bob, side = Sell, quantity = 1.0, limitPrice = 0.3333333333, minFill = 1.0
+      expiresAt = None, holdingCids = [bobCC]
+  (ccFactory, ccArgs, ccDisclosures) <- getAmuletFactoryContext f.registry
+  (requestedAt, allocateBefore, settleBefore) <- matchDeadlines
+  aliceTusdDisc <- queryDisclosure' @TestTokenHolding f.alice aliceTusd
+  bobCCDisc <- queryDisclosure' @Amulet f.bob (coerceContractId bobCC)
+  result <- submitWithDisclosures' f.venue
+    (f.ttRulesDisclosure <> ccDisclosures <> aliceTusdDisc <> bobCCDisc) $
+    exerciseCmd f.poolCid DarkPool_Match with
+      buyOrderCid = buyCid, sellOrderCid = sellCid, matchId = "cc-m2"
+      requestedAt, allocateBefore, settleBefore
+      buyFunding = FundingArgs with
+        allocationFactoryCid = toInterfaceContractId @AllocationFactory f.ttRules
+        allocateArgs = emptyExtraArgs
+      sellFunding = FundingArgs with
+        allocationFactoryCid = ccFactory, allocateArgs = ccArgs
+      buyExecuteArgs = emptyExtraArgs
+      sellExecuteArgs = ccArgs
+  result.execPrice === 1.1666666666
+  bobTusd <- ttBalance f.bob "TUSD"
+  bobTusd === 1.1666666666
+  -- the CC base leg settled too: alice received 1 CC, bob's tapped CC is spent
+  WalletClient.checkBalanceApprox f.alice f.registry.instrumentId 1.0
+  WalletClient.checkBalanceApprox f.bob f.registry.instrumentId 0.0

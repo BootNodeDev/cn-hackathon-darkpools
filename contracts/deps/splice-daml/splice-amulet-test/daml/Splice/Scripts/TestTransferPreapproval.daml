@@ -1,0 +1,427 @@
+-- Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module Splice.Scripts.TestTransferPreapproval where
+
+import Daml.Script
+import DA.Assert
+import DA.Optional
+import DA.Time
+import qualified DA.TextMap as TextMap
+import Splice.Scripts.Util
+import Splice.Amulet
+import Splice.AmuletRules
+import Splice.Amulet.TokenApiUtils
+import Splice.ExternalPartyAmuletRules
+import Splice.Fees
+import Splice.Types
+import Splice.Testing.Registries.AmuletRegistry (convertAllFeaturedAppActivityMarkers)
+import Splice.Testing.Utils
+
+
+createTransferPreapproval : Party -> Party -> Party -> Time -> Script (ContractId TransferPreapproval)
+createTransferPreapproval receiver provider dso expiresAt = do
+  now <- getTime
+  submit (actAs receiver <> actAs provider <> actAs dso) $ createCmd TransferPreapproval with
+      receiver
+      provider
+      dso
+      validFrom = now
+      lastRenewedAt = now
+      expiresAt
+
+testTransferPreapprovalSend : Script ()
+testTransferPreapprovalSend = script do
+  DefaultAppWithUsers{..} <- setupDefaultAppWithUsers
+
+  now <- getTime
+  let expiresAt = (now `addRelTime` days 1)
+  transferPreapprovalCid <- createTransferPreapproval alice.primaryParty aliceValidator.primaryParty app.dso expiresAt
+
+  -- Externally signed transaction (or not if bob is not also externally hosted, like for a sweep) to send amulets
+  context <- getPaymentTransferContext app bob
+  amuletCid <- tap app bob 50.0
+  result <- submit (actAs bob.primaryParty <> readAs app.dso) $ exerciseCmd transferPreapprovalCid TransferPreapproval_Send
+    with
+      sender = bob.primaryParty
+      context
+      inputs = [InputAmulet amuletCid]
+      amount = 10.0
+      description = Some "test-description"
+
+  TextMap.lookup reasonMetaKey (fromSome result.meta).values === Some "test-description"
+
+  -- Move forward in time to expire pre-approval
+  passTime (days 1)
+
+  -- Send fails if the pre-approval has expired
+  context <- getPaymentTransferContext app bob
+  amuletCid <- tap app bob 50.0
+  submitMustFail (actAs bob.primaryParty <> readAs app.dso) $ exerciseCmd transferPreapprovalCid TransferPreapproval_Send
+      with
+        sender = bob.primaryParty
+        context
+        inputs = [InputAmulet amuletCid]
+        amount = 10.0
+        description = None
+
+  pure ()
+
+testTransferPreapprovalRenewal : Script ()
+testTransferPreapprovalRenewal = script do
+  DefaultAppWithUsers{..} <- setupDefaultAppWithUsers
+
+  now <- getTime
+  let expiresAt = (now `addRelTime` days 1)
+  transferPreapprovalCid <- createTransferPreapproval alice.primaryParty aliceValidator.primaryParty app.dso expiresAt
+  Some transferPreapproval <- queryContractId app.dso transferPreapprovalCid
+  providerTransferContext <- getPaymentTransferContext app aliceValidator
+
+  -- Renewal fails if provided `newExpiresAt` is earlier than previous `expiresAt`
+  providerAmuletCid <- tap app aliceValidator 10.0
+  submitMustFail (actAs aliceValidator.primaryParty <> readAs app.dso) $
+    exerciseCmd transferPreapprovalCid TransferPreapproval_Renew with
+      context = providerTransferContext
+      inputs = [InputAmulet providerAmuletCid]
+      newExpiresAt = now
+
+  -- Provider can renew the pre-approval (before expiry)
+  let newExpiresAt = now `addRelTime` (days 2)
+  result <- submit (actAs aliceValidator.primaryParty <> readAs app.dso) $
+    exerciseCmd transferPreapprovalCid TransferPreapproval_Renew with
+      context = providerTransferContext
+      inputs = [InputAmulet providerAmuletCid]
+      newExpiresAt
+  Some renewedPreapproval <- queryContractId app.dso result.transferPreapprovalCid
+  renewedPreapproval === transferPreapproval with
+    lastRenewedAt = now
+    expiresAt = newExpiresAt
+
+  -- Move forward in time to expire pre-approval
+  passTime (days 2)
+
+  -- Renewal fails if the pre-approval has expired
+  providerAmuletCid2 <- tap app aliceValidator 10.0
+  submitMustFail (actAs aliceValidator.primaryParty <> readAs app.dso) $
+    exerciseCmd transferPreapprovalCid TransferPreapproval_Renew with
+      context = providerTransferContext
+      inputs = [InputAmulet providerAmuletCid2]
+      newExpiresAt = now
+
+
+testTransferPreapprovalCancelExpire : Script ()
+testTransferPreapprovalCancelExpire = script do
+  DefaultAppWithUsers{..} <- setupDefaultAppWithUsers
+
+  now <- getTime
+  let expiresAt = (now `addRelTime` days 1)
+
+  -- User can cancel pre-approval
+  transferPreapprovalCid <- createTransferPreapproval alice.primaryParty aliceValidator.primaryParty app.dso expiresAt
+  submit alice.primaryParty $ exerciseCmd transferPreapprovalCid (TransferPreapproval_Cancel alice.primaryParty)
+
+  -- Provider can cancel pre-approval
+  transferPreapprovalCid2 <- createTransferPreapproval alice.primaryParty aliceValidator.primaryParty app.dso expiresAt
+  submit aliceValidator.primaryParty $ exerciseCmd transferPreapprovalCid2 (TransferPreapproval_Cancel aliceValidator.primaryParty)
+
+  transferPreapprovalCid3 <- createTransferPreapproval alice.primaryParty aliceValidator.primaryParty app.dso expiresAt
+  -- Move forward in time to expire pre-approval
+  passTime (days 1)
+
+  -- Expired pre-approvals cannot be canceled...
+  submitMustFail alice.primaryParty $ exerciseCmd transferPreapprovalCid3 (TransferPreapproval_Cancel alice.primaryParty)
+  submitMustFail aliceValidator.primaryParty $ exerciseCmd transferPreapprovalCid3 (TransferPreapproval_Cancel aliceValidator.primaryParty)
+  -- ...but the DSO party can archive them
+  submit app.dso $ exerciseCmd transferPreapprovalCid3 TransferPreapproval_Expire
+
+  pure ()
+
+testTransferCommand : Script ()
+testTransferCommand = script do
+  DefaultAppWithUsers{..} <- setupDefaultAppWithUsers
+
+  externalParty <- allocateParty "externalParty"
+  wrongReceiver <- allocateParty "wrongReceiver"
+  fakeDso <- allocateParty "fake-dso"
+  (externalPartyAmuletRulesCid, _) <- getExternalPartyAmuletRules app
+
+  now <- getTime
+
+  let expiresAt = now `addRelTime` hours 24
+
+  transferPreapprovalCid <- createTransferPreapproval externalParty aliceValidator.primaryParty app.dso expiresAt
+  transferPreapprovalFakeDsoCid <- createTransferPreapproval externalParty aliceValidator.primaryParty fakeDso expiresAt
+  transferPreapprovalWrongReceiverCid <- createTransferPreapproval wrongReceiver aliceValidator.primaryParty app.dso expiresAt
+
+  ExternalPartyAmuletRules_CreateTransferCommandResult transferCmd <- submit (actAs alice.primaryParty <> readAs app.dso) $ exerciseCmd externalPartyAmuletRulesCid ExternalPartyAmuletRules_CreateTransferCommand
+    with
+      sender = alice.primaryParty
+      receiver = externalParty
+      delegate = aliceValidator.primaryParty
+      amount = 42.0
+      expiresAt = now `addRelTime` hours 12
+      nonce = 0
+      description = Some "test-transfer-command"
+      expectedDso = Some app.dso
+
+  transferCounterCid <- submit app.dso $ createCmd TransferCommandCounter with
+    dso = app.dso
+    sender = alice.primaryParty
+    nextNonce = 0
+
+  amulet <- tap app alice 50.0
+
+  featuredAppRight <- featureApp app aliceValidator
+
+  context <- getPaymentTransferContextFeaturedApp app alice (Some featuredAppRight)
+  convertAllFeaturedAppActivityMarkers app.dso
+
+  amulets <- query @Amulet externalParty
+  amulets === []
+  appRewards <- query @AppRewardCoupon aliceValidator.primaryParty
+  appRewards === []
+
+  -- DSO party is checked
+  -- Note that the delegate is expected to have access to a node on which `alice` is
+  -- hosted at least with observer rights. The readAs right for the DSO party in the submission is just
+  -- shortcut to avoid packaging up the DSO party provided contracts (e.g. `AmuletRules`).
+  _ <- submitMustFail (actAs aliceValidator.primaryParty <> readAs alice.primaryParty <> readAs app.dso) $ exerciseCmd transferCmd TransferCommand_Send
+    with
+      context
+      inputs = [InputAmulet amulet]
+      transferPreapprovalCidO = Some transferPreapprovalFakeDsoCid
+      transferCounterCid
+
+  -- receiver is checked
+  _ <- submitMustFail (actAs aliceValidator.primaryParty <> readAs alice.primaryParty <> readAs app.dso) $ exerciseCmd transferCmd TransferCommand_Send
+    with
+      context
+      inputs = [InputAmulet amulet]
+      transferPreapprovalCidO = Some transferPreapprovalWrongReceiverCid
+      transferCounterCid
+
+  TransferCommand_SendResult (TransferCommandResultSuccess _) _ _ <- submit (actAs aliceValidator.primaryParty <> readAs alice.primaryParty <> readAs app.dso) $ exerciseCmd transferCmd TransferCommand_Send
+    with
+      context = context
+      inputs = [InputAmulet amulet]
+      transferPreapprovalCidO = Some transferPreapprovalCid
+      transferCounterCid
+
+  [(transferCounterCid, _)] <- query @TransferCommandCounter alice.primaryParty
+
+  amulets <- query @Amulet externalParty
+  map snd amulets === [Amulet app.dso externalParty (ExpiringAmount 42.0 (Round 1) (RatePerRound 0.00002))]
+  None <- queryContractId app.dso transferCmd
+  convertAllFeaturedAppActivityMarkers app.dso
+  appRewards <- query @AppRewardCoupon aliceValidator.primaryParty
+  map snd appRewards === [AppRewardCoupon app.dso aliceValidator.primaryParty True 1.0 (Round 1) (Some aliceValidator.primaryParty)]
+
+  ExternalPartyAmuletRules_CreateTransferCommandResult transferCmd <- submit (actAs alice.primaryParty <> readAs app.dso) $ exerciseCmd externalPartyAmuletRulesCid ExternalPartyAmuletRules_CreateTransferCommand
+    with
+      sender = alice.primaryParty
+      receiver = externalParty
+      delegate = aliceValidator.primaryParty
+      amount = 42.0
+      expiresAt = now `addRelTime` hours 12
+      nonce = 1
+      description = Some "test-transfer-command"
+      expectedDso = Some app.dso
+
+  allAmulets <- query @Amulet alice.primaryParty
+
+  context <- getPaymentTransferContext app alice
+
+  passTime (hours 13)
+
+  -- Fails if time is after cmd expiry
+  submitMustFail (actAs aliceValidator.primaryParty <> readAs alice.primaryParty <> readAs app.dso) $ exerciseCmd transferCmd TransferCommand_Send
+    with
+      context = context
+      inputs = map (InputAmulet . fst) allAmulets
+      transferPreapprovalCidO = Some transferPreapprovalCid
+      transferCounterCid
+
+  now <- getTime
+
+  ExternalPartyAmuletRules_CreateTransferCommandResult transferCmd <- submit (actAs alice.primaryParty <> readAs app.dso) $ exerciseCmd externalPartyAmuletRulesCid ExternalPartyAmuletRules_CreateTransferCommand
+    with
+      sender = alice.primaryParty
+      receiver = externalParty
+      delegate = aliceValidator.primaryParty
+      amount = 42.0
+      expiresAt = now `addRelTime` hours 1
+      nonce = 1
+      description = Some "test-transfer-command"
+      expectedDso = Some app.dso
+
+  -- submission fails if expiresAt is not in the future
+  submitMustFail (actAs alice.primaryParty <> readAs app.dso) $ exerciseCmd externalPartyAmuletRulesCid ExternalPartyAmuletRules_CreateTransferCommand
+    with
+      sender = alice.primaryParty
+      receiver = externalParty
+      delegate = aliceValidator.primaryParty
+      amount = 42.0
+      expiresAt = now
+      nonce = 1
+      description = Some "test-transfer-command"
+      expectedDso = Some app.dso
+
+  assert (length allAmulets > 1)
+
+  -- fails with out of funds
+  let expect = expectFailureStatus \fs ->
+        fs.errorId == "splice.lfdecentralizedtrust.org/insufficient-funds" && fs.meta == TextMap.fromList [("requiredAmount", "33.0")]
+  submitMultiMustFail'' expect [aliceValidator.primaryParty] [alice.primaryParty, app.dso]  $ exerciseCmd transferCmd TransferCommand_Send
+    with
+      context = context
+      inputs = map (InputAmulet . fst) allAmulets
+      transferPreapprovalCidO = Some transferPreapprovalCid
+      transferCounterCid
+
+  [(transferCounterCid, transferCounter)] <- query @TransferCommandCounter alice.primaryParty
+  -- counter does not increase on failed transfers
+  transferCounter.nextNonce === 1
+
+  -- sender can withdraw
+  ExternalPartyAmuletRules_CreateTransferCommandResult transferCmd <- submit (actAs alice.primaryParty <> readAs app.dso) $ exerciseCmd externalPartyAmuletRulesCid ExternalPartyAmuletRules_CreateTransferCommand
+    with
+      sender = alice.primaryParty
+      receiver = externalParty
+      delegate = aliceValidator.primaryParty
+      amount = 42.0
+      expiresAt = now `addRelTime` hours 1
+      nonce = 2
+      description = Some "test-transfer-command"
+      expectedDso = Some app.dso
+
+  submit alice.primaryParty $ exerciseCmd transferCmd TransferCommand_Withdraw
+
+  None <- queryContractId app.dso transferCmd
+
+  -- stakeholder can expire
+  ExternalPartyAmuletRules_CreateTransferCommandResult transferCmd <- submit (actAs alice.primaryParty <> readAs app.dso) $ exerciseCmd externalPartyAmuletRulesCid ExternalPartyAmuletRules_CreateTransferCommand
+    with
+      sender = alice.primaryParty
+      receiver = externalParty
+      delegate = aliceValidator.primaryParty
+      amount = 42.0
+      expiresAt = now `addRelTime` hours 1
+      nonce = 2
+      description = Some "test-transfer-command"
+      expectedDso = Some app.dso
+
+  submitMustFail app.dso $ exerciseCmd transferCmd (TransferCommand_Expire app.dso)
+
+  passTime (hours 1)
+  now <- getTime
+
+  submit app.dso $ exerciseCmd transferCmd (TransferCommand_Expire app.dso)
+
+  None <- queryContractId app.dso transferCmd
+
+  -- Old nonces get immediately rejected and archive the transer command
+  ExternalPartyAmuletRules_CreateTransferCommandResult transferCmd <- submit (actAs alice.primaryParty <> readAs app.dso) $ exerciseCmd externalPartyAmuletRulesCid ExternalPartyAmuletRules_CreateTransferCommand
+    with
+      sender = alice.primaryParty
+      receiver = externalParty
+      delegate = aliceValidator.primaryParty
+      amount = 42.0
+      expiresAt = now `addRelTime` hours 1
+      nonce = 1
+      description = Some "test-transfer-command"
+      expectedDso = Some app.dso
+
+  amulets <- fmap fst <$> query @Amulet alice.primaryParty
+
+  submitMultiMustFail'' (expectErrorId "splice.lfdecentralizedtrust.org/insufficient-funds") [aliceValidator.primaryParty] [alice.primaryParty, app.dso] $
+    exerciseCmd transferCmd TransferCommand_Send
+      with
+        context = context
+        inputs = InputAmulet <$> amulets
+        transferPreapprovalCidO = Some transferPreapprovalCid
+        transferCounterCid
+
+  ExternalPartyAmuletRules_CreateTransferCommandResult transferCmdFuture <- submit (actAs alice.primaryParty <> readAs app.dso) $ exerciseCmd externalPartyAmuletRulesCid ExternalPartyAmuletRules_CreateTransferCommand
+    with
+      sender = alice.primaryParty
+      receiver = externalParty
+      delegate = aliceValidator.primaryParty
+      amount = 42.0
+      expiresAt = now `addRelTime` hours 1
+      nonce = 2
+      description = Some "test-transfer-command"
+      expectedDso = Some app.dso
+
+  amulet <- tap app alice 50.0
+
+  _ <- submitMustFail (actAs aliceValidator.primaryParty <> readAs alice.primaryParty <> readAs app.dso) $ exerciseCmd transferCmdFuture TransferCommand_Send
+    with
+      context = context
+      inputs = [InputAmulet amulet]
+      transferPreapprovalCidO = Some transferPreapprovalCid
+      transferCounterCid
+
+  -- Sequence another transfer with nonce 1
+
+  ExternalPartyAmuletRules_CreateTransferCommandResult transferCmd <- submit (actAs alice.primaryParty <> readAs app.dso) $ exerciseCmd externalPartyAmuletRulesCid ExternalPartyAmuletRules_CreateTransferCommand
+    with
+      sender = alice.primaryParty
+      receiver = externalParty
+      delegate = aliceValidator.primaryParty
+      amount = 42.0
+      expiresAt = now `addRelTime` hours 1
+      nonce = 1
+      description = Some "test-transfer-command"
+      expectedDso = Some app.dso
+
+  amulet <- tap app alice 50.0
+
+  TransferCommand_SendResult (TransferCommandResultSuccess _) _ _ <- submit (actAs aliceValidator.primaryParty <> readAs alice.primaryParty <> readAs app.dso) $ exerciseCmd transferCmd TransferCommand_Send
+    with
+      context = context
+      inputs = [InputAmulet amulet]
+      transferPreapprovalCidO = Some transferPreapprovalCid
+      transferCounterCid
+
+  [(transferCounterCid, _)] <- query @TransferCommandCounter alice.primaryParty
+
+  amulet <- tap app alice 50.0
+
+  -- transferCmdFuture can now be submitted after the counter advanced
+  TransferCommand_SendResult (TransferCommandResultSuccess _) _ _ <- submit (actAs aliceValidator.primaryParty <> readAs alice.primaryParty <> readAs app.dso) $ exerciseCmd transferCmdFuture TransferCommand_Send
+    with
+      context = context
+      inputs = [InputAmulet amulet]
+      transferPreapprovalCidO = Some transferPreapprovalCid
+      transferCounterCid
+
+  [(transferCounterCid, transferCounter)] <- query @TransferCommandCounter alice.primaryParty
+  transferCounter.nextNonce === 3
+
+  receiverNoPreapproval <- allocateParty "receiver-no-preapproval"
+  ExternalPartyAmuletRules_CreateTransferCommandResult transferCmd <- submit (actAs alice.primaryParty <> readAs app.dso) $ exerciseCmd externalPartyAmuletRulesCid ExternalPartyAmuletRules_CreateTransferCommand
+    with
+      sender = alice.primaryParty
+      delegate = aliceValidator.primaryParty
+      receiver = receiverNoPreapproval
+      amount = 42.0
+      expiresAt = now `addRelTime` hours 1
+      nonce = 3
+      description = Some "test-transfer-command"
+      expectedDso = Some app.dso
+
+  -- transferCmdFuture can now be submitted after the counter advanced
+  TransferCommand_SendResult (TransferCommandResultFailure msg) _ _ <- submit (actAs aliceValidator.primaryParty <> readAs alice.primaryParty <> readAs app.dso) $ exerciseCmd transferCmd TransferCommand_Send
+    with
+      context = context
+      inputs = []
+      transferPreapprovalCidO = None -- no preapproval
+      transferCounterCid
+
+  msg === ITR_Other ("No TransferPreapproval for receiver " <> show receiverNoPreapproval)
+
+  [(_, transferCounter)] <- query @TransferCommandCounter alice.primaryParty
+  transferCounter.nextNonce === 4
+  None <- queryContractId app.dso transferCmd
+
+  pure ()

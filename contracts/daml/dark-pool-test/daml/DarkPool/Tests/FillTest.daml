@@ -1,0 +1,173 @@
+module DarkPool.Tests.FillTest where
+
+import DA.Assert ((===))
+import DA.Time
+import Daml.Script
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.HoldingV1
+import Splice.Api.Token.AllocationV1
+import Splice.Api.Token.AllocationInstructionV1
+import Splice.Testing.Utils
+import DarkPool
+import DarkPool.Math
+import DarkPool.Tests.TestToken
+
+data FillFixture = FillFixture with
+  venue : Party
+  alice : Party
+  bob : Party
+  ttAdmin : Party
+  rulesCid : ContractId TestTokenRules
+  poolCid : ContractId DarkPool
+  baseId : InstrumentId
+  quoteId : InstrumentId
+  factoryCid : ContractId AllocationFactory
+  rulesDisclosure : Disclosures'
+  poolDisclosure : Disclosures'
+
+setupFill : Script FillFixture
+setupFill = do
+  venue <- allocatePartyExact "fill-venue"
+  alice <- allocatePartyExact "fill-alice"
+  bob <- allocatePartyExact "fill-bob"
+  ttAdmin <- allocatePartyExact "fill-tt-admin"
+  rulesCid <- submit ttAdmin $ createCmd TestTokenRules with admin = ttAdmin, symbol = "TUSD"
+  -- the factory (registry context) stays disclosed even in co-hosted v1; the
+  -- registry admin is external (Scan-served), unlike the co-hosted traders.
+  rulesDisclosure <- queryDisclosure' @TestTokenRules ttAdmin rulesCid
+  let baseId = InstrumentId ttAdmin "OTHER"   -- base never funded here; sells not tested in this module
+  let quoteId = InstrumentId ttAdmin "TUSD"
+  poolCid <- submit venue $ createCmd DarkPool with
+    venue, poolId = "P1", base = baseId, quote = quoteId, minFillFloor = 1.0
+  -- On the single-store IDE ledger a non-stakeholder cannot exercise a choice
+  -- on the venue-signed pool via plain submit, so the trader places orders
+  -- against a disclosed pool (mirrors how a real trader acquires the pool
+  -- contract off-ledger from the venue before placing).
+  poolDisclosure <- queryDisclosure' @DarkPool venue poolCid
+  pure FillFixture with
+    venue, alice, bob, ttAdmin, rulesCid, poolCid, baseId, quoteId
+    factoryCid = toInterfaceContractId @AllocationFactory rulesCid
+    rulesDisclosure
+    poolDisclosure
+
+mkSettlement : Party -> Time -> SettlementInfo
+mkSettlement venue now = SettlementInfo with
+  executor = venue
+  settlementRef = Reference with id = "fill-test", cid = None
+  requestedAt = addRelTime now (negate (seconds 1))
+  allocateBefore = addRelTime now (minutes 5)
+  settleBefore = addRelTime now (hours 1)
+  meta = emptyMetadata
+
+-- mint TUSD funding for alice, returning the interface cid the order carries
+-- and a disclosure of the holding. The venue is not a stakeholder of the
+-- trader's holding, so it must hold a disclosure to let the factory fetch it
+-- inside the venue-submitted Order_Fill (the registry, not the dark pool,
+-- reaches into the holding; the venue does no coin selection).
+mintTUSD : FillFixture -> Decimal -> Script (ContractId Holding, Disclosures')
+mintTUSD f amount = do
+  cid <- submit f.ttAdmin $ createCmd TestTokenHolding with
+    admin = f.ttAdmin, owner = f.alice, symbol = "TUSD", amount
+  disclosure <- queryDisclosure' @TestTokenHolding f.alice cid
+  pure (toInterfaceContractId @Holding cid, disclosure)
+
+-- place a buy order through the pool's factory choice, funded by holdingCids
+placeBuy : FillFixture -> Decimal -> Decimal -> Decimal -> Optional Time -> [ContractId Holding] -> Script (ContractId Order)
+placeBuy f quantity limitPrice minFill expiresAt holdingCids =
+  submitWithDisclosures' f.alice f.poolDisclosure $ exerciseCmd f.poolCid DarkPool_PlaceOrder with
+    trader = f.alice, side = Buy, quantity, limitPrice, minFill, expiresAt, holdingCids
+
+-- registry context only; the holdings come from the order now
+ttFunding : FillFixture -> FundingArgs
+ttFunding f = FundingArgs with
+  allocationFactoryCid = f.factoryCid
+  allocateArgs = emptyExtraArgs
+
+fillHappyPathTest : Script ()
+fillHappyPathTest = do
+  f <- setupFill
+  now <- getTime
+  -- buy 10 base at limit 2.0, minFill 2: needs up to 20 quote
+  (holdingCid, holdingDisclosure) <- mintTUSD f 20.0
+  orderCid <- placeBuy f 10.0 2.0 2.0 None [holdingCid]
+  -- partial fill: 4 base at 1.5 -> sends 6 quote, remainder 6 recreated. The
+  -- venue submits with the registry rules AND the funding holding disclosed:
+  -- the factory archives the holding inside this venue-submitted transaction.
+  result <- submitWithDisclosures' f.venue (f.rulesDisclosure <> holdingDisclosure) $
+    exerciseCmd orderCid Order_Fill with
+      fillQty = 4.0, execPrice = 1.5, counterparty = f.bob
+      settlement = mkSettlement f.venue now
+      funding = ttFunding f
+  Some remainderCid <- pure result.remainderOrderCid
+  Some remainder <- queryContractId f.alice remainderCid
+  remainder.quantity === 6.0
+  remainder.limitPrice === 2.0
+  -- the remainder is self-funded by the change holding (the key v1 invariant)
+  length remainder.holdingCids === 1
+  -- the allocation reserves exactly the rounded quote amount
+  Some allocPayload <- queryContractId f.alice (fromInterfaceContractId @TestTokenAllocation result.allocationCid)
+  allocPayload.spec.transferLeg.amount === 6.0
+  allocPayload.spec.transferLeg.sender === f.alice
+  allocPayload.spec.transferLeg.receiver === f.bob
+  -- alice got 14 change (20 funded - 6 sent)
+  aliceHoldings <- query @TestTokenHolding f.alice
+  assertMsg "change of 14" (any (\(_, h) -> h.owner == f.alice && h.amount == 14.0) aliceHoldings)
+  -- trader can recover the escrow unilaterally (the anti-griefing bound)
+  _ <- submit f.alice $ exerciseCmd result.allocationCid
+    Allocation_Withdraw with extraArgs = emptyExtraArgs
+  pure ()
+
+-- A venue-submitted Order_Fill is expected to fail on a SPECIFIC in-body guard.
+-- 'submitWithDisclosuresMustFail'' only asserts that SOME failure occurred, so a
+-- refactor that reorders the asserts could shift which guard fires first and
+-- still pass. This pins the failure to the guard's assert message: trySubmit
+-- surfaces an uncaught assertMsg as a FailureStatus whose message is the assert
+-- text, which expectMessageContains matches.
+fillFailsWith : Text -> Party -> Disclosures' -> Commands FillResult -> Script ()
+fillFailsWith expected = submitWithDisclosuresMustFail'' (expectMessageContains expected)
+
+fillValidationTest : Script ()
+fillValidationTest = do
+  f <- setupFill
+  now <- getTime
+  (holdingCid, holdingDisclosure) <- mintTUSD f 30.0
+  orderCid <- placeBuy f 10.0 2.0 2.0 None [holdingCid]
+  -- venue submissions carry the registry rules AND the funding holding so the
+  -- factory can fetch it; each guard below trips on its in-body assert, not on
+  -- a disclosure technicality.
+  let ds = f.rulesDisclosure <> holdingDisclosure
+  let funding = ttFunding f
+  let fill qty px cp = exerciseCmd orderCid Order_Fill with
+        fillQty = qty, execPrice = px, counterparty = cp
+        settlement = mkSettlement f.venue now, funding
+  -- the trader cannot exercise the venue's choice: an authorization failure, not
+  -- an in-body assert, so we only require that it fails
+  submitWithDisclosuresMustFail' f.alice ds (fill 4.0 1.5 f.bob)
+  -- each remaining case is pinned to the specific guard it must trip, so
+  -- reordering the asserts in Order_Fill would fail this test rather than pass on
+  -- a different rejection
+  -- price above the buyer's limit
+  fillFailsWith "price within limit" f.venue ds (fill 4.0 2.5 f.bob)
+  -- oversized fill
+  fillFailsWith "fill within order bounds" f.venue ds (fill 11.0 1.5 f.bob)
+  -- below the order's own minFill (fillQty < minFill)
+  fillFailsWith "fill within order bounds" f.venue ds (fill 1.0 1.5 f.bob)
+  -- self-match at the order level
+  fillFailsWith "counterparty differs from trader" f.venue ds (fill 4.0 1.5 f.alice)
+  -- a venue that names someone else as the settlement executor is rejected: the
+  -- venue must be the executor of the settlement it drives
+  let foreignExecSettlement = (mkSettlement f.venue now) with executor = f.bob
+  fillFailsWith "settlement executor is the venue" f.venue ds
+    (exerciseCmd orderCid Order_Fill with
+      fillQty = 4.0, execPrice = 1.5, counterparty = f.bob
+      settlement = foreignExecSettlement, funding)
+  -- expired order cannot fill (placement allows a past expiry; the fill rejects it)
+  (expiredHoldingCid, expiredDisclosure) <- mintTUSD f 20.0
+  expiredCid <- placeBuy f 10.0 2.0 2.0 (Some (addRelTime now (negate (seconds 1)))) [expiredHoldingCid]
+  fillFailsWith "order not expired" f.venue (f.rulesDisclosure <> expiredDisclosure)
+    (exerciseCmd expiredCid Order_Fill with
+      fillQty = 4.0, execPrice = 1.5, counterparty = f.bob
+      settlement = mkSettlement f.venue now, funding)
+  -- sub-minFill tail is NOT recreated: fill 9 of 10 leaves tail 1 < minFill 2
+  result <- submitWithDisclosures' f.venue ds (fill 9.0 1.5 f.bob)
+  result.remainderOrderCid === None

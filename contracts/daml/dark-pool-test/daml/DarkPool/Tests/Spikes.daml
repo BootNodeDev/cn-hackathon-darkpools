@@ -1,0 +1,234 @@
+-- | De-risking spikes, kept as regression tests: they pin the authority-chain
+-- pattern and the Amulet/harness API behavior the integration suite assumes.
+module DarkPool.Tests.Spikes where
+
+import Daml.Script
+import Splice.Testing.Utils
+import DA.Time
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.HoldingV1
+import Splice.Api.Token.AllocationV1
+import Splice.Api.Token.AllocationInstructionV1
+import Splice.Amulet (Amulet)
+import Splice.Testing.Registries.AmuletRegistry qualified as AmuletRegistry
+import Splice.Testing.TokenStandard.RegistryApi qualified as RegistryApi
+import Splice.Testing.TokenStandard.WalletClient qualified as WalletClient
+
+-- | Toy order: signatory trader, the venue may fill it.
+template ToyOrder
+  with
+    trader : Party
+    venue : Party
+  where
+    signatory trader
+    observer venue
+
+    choice ToyOrder_Fill : ContractId ToyAuthority
+      -- body authority: {trader (signatory), venue (controller)}
+      controller venue
+      do
+        -- a private artifact of this trader's subtree (stand-in for the
+        -- remainder order); the counterparty must never see it
+        privateCid <- create ToyPrivate with trader, venue
+        create ToyAuthority with trader, venue, privateCid
+
+-- | Stand-in for the remainder order: stakeholders are trader + venue only.
+template ToyPrivate
+  with
+    trader : Party
+    venue : Party
+  where
+    signatory trader
+    observer venue
+
+-- | Toy FillAuthority: transient, signed by trader + venue.
+template ToyAuthority
+  with
+    trader : Party
+    venue : Party
+    privateCid : ContractId ToyPrivate
+  where
+    signatory trader, venue
+
+    choice ToyAuthority_Settle : ContractId ToyReceipt
+      with
+        counterAuthorityCid : ContractId ToyAuthority
+      -- body authority: {trader, venue}; both needed to exercise SettleWith below
+      controller venue
+      do
+        exercise counterAuthorityCid ToyAuthority_SettleWith with
+          actorTrader = trader
+
+    choice ToyAuthority_SettleWith : ContractId ToyReceipt
+      with
+        actorTrader : Party
+      -- body authority: signatories {trader, venue} + actors {venue, actorTrader}
+      -- = all three parties
+      controller venue, actorTrader
+      do
+        create ToyReceipt with venue, traderA = actorTrader, traderB = trader
+
+-- | Needs all three signatures to exist. Created by venue-only submission:
+-- the whole point of the chain.
+template ToyReceipt
+  with
+    venue : Party
+    traderA : Party
+    traderB : Party
+  where
+    signatory venue, traderA, traderB
+
+-- venue-only driver: one submission chains both fills and the settle, proving
+-- the full {venue, A, B} authority assembles without per-party submissions.
+template ToyMatcher
+  with
+    venue : Party
+  where
+    signatory venue
+    choice ToyMatcher_Run : ContractId ToyReceipt
+      with
+        orderA : ContractId ToyOrder
+        orderB : ContractId ToyOrder
+      controller venue
+      do
+        authA <- exercise orderA ToyOrder_Fill
+        authB <- exercise orderB ToyOrder_Fill
+        exercise authA ToyAuthority_Settle with counterAuthorityCid = authB
+
+spike1AuthorityChain : Script ()
+spike1AuthorityChain = do
+  venue <- allocatePartyExact "spike1-venue"
+  alice <- allocatePartyExact "spike1-alice"
+  bob <- allocatePartyExact "spike1-bob"
+  orderA <- submit alice $ createCmd ToyOrder with trader = alice, venue
+  orderB <- submit bob $ createCmd ToyOrder with trader = bob, venue
+  -- venue-only submission drives the whole chain
+  receiptCid <- submit venue $
+    createAndExerciseCmd (ToyMatcher venue) (ToyMatcher_Run orderA orderB)
+  Some receipt <- queryContractId venue receiptCid
+  assertMsg "receipt carries all three parties"
+    (receipt.venue == venue && ((receipt.traderA == alice && receipt.traderB == bob)
+                             || (receipt.traderA == bob && receipt.traderB == alice)))
+  -- privacy probe: bob is not a stakeholder of alice's private artifact
+  alicePrivates <- query @ToyPrivate alice
+  bobView <- query @ToyPrivate bob
+  assertMsg "alice sees exactly her own private contract"
+    (length (filter (\(_, p) -> p.trader == alice) alicePrivates) == 1)
+  assertMsg "bob sees only his own private contract, never alice's"
+    (all (\(_, p) -> p.trader == bob) bobView)
+
+-- Spike 2: queryDisclosure as the trader + submit-with-disclosures as another
+-- party, against real Amulet contracts on SDK 3.4.11. Exercises the exact
+-- API surface the venue backend will use.
+spike2Disclosure : Script ()
+spike2Disclosure = do
+  registry <- AmuletRegistry.initialize AmuletRegistry.defaultAmuletRegistryConfig
+  alice <- allocatePartyExact "spike2-alice"
+  bob <- allocatePartyExact "spike2-bob"
+  holdingCid <- AmuletRegistry.tapFaucet registry alice 50.0
+  -- trader-client side: fetch the sealed created-event blob for the holding
+  holdingDisclosure <- queryDisclosure' @Amulet alice (coerceContractId holdingCid)
+  -- the harness side: factory + choice context + factory disclosures
+  now <- getTime
+  let spec = AllocationSpecification with
+        settlement = SettlementInfo with
+          executor = alice
+          settlementRef = Reference with id = "spike2", cid = None
+          requestedAt = addRelTime now (negate (seconds 1))
+          allocateBefore = addRelTime now (minutes 5)
+          settleBefore = addRelTime now (hours 1)
+          meta = emptyMetadata
+        transferLegId = "leg"
+        transferLeg = TransferLeg with
+          sender = alice, receiver = bob, amount = 10.0
+          instrumentId = registry.instrumentId, meta = emptyMetadata
+  enriched <- RegistryApi.getAllocationFactory registry AllocationFactory_Allocate with
+    expectedAdmin = registry.dso
+    allocation = spec
+    requestedAt = spec.settlement.requestedAt
+    inputHoldingCids = [holdingCid]
+    extraArgs = emptyExtraArgs
+  -- submit WITH both disclosure sets; alice allocates against contracts
+  -- (ExternalPartyAmuletRules, ExternalPartyConfigState) she is no stakeholder of
+  result <- submitWithDisclosures' alice (enriched.disclosures <> holdingDisclosure) $
+    exerciseCmd enriched.factoryCid enriched.arg
+  case result.output of
+    AllocationInstructionResult_Completed{} -> pure ()
+    _ -> fail "amulet did not complete the allocation atomically"
+
+-- Spike 3 toy: signed by all three parties up front so one venue-driven choice
+-- can allocate (needs sender) and execute (needs executor+sender+receiver)
+-- within a single transaction. The real design assembles these authorities via
+-- the FillAuthority chain instead; here we only de-risk the AMULET side:
+-- third-party app code driving the factory + same-tx execute + pre-built context.
+template SpikeJointRunner
+  with
+    venue : Party
+    sender : Party
+    receiver : Party
+  where
+    signatory venue, sender, receiver
+
+    choice SpikeJointRunner_Run : Allocation_ExecuteTransferResult
+      with
+        factoryCid : ContractId AllocationFactory
+        spec : AllocationSpecification
+        holdingCids : [ContractId Holding]
+        -- one pre-built context, reused for both allocate and execute: that the
+        -- SAME context drives both calls in one transaction is the spike's point.
+        extraArgs : ExtraArgs
+      controller venue
+      do
+        result <- exercise factoryCid AllocationFactory_Allocate with
+          expectedAdmin = spec.transferLeg.instrumentId.admin
+          allocation = spec
+          requestedAt = spec.settlement.requestedAt
+          inputHoldingCids = holdingCids
+          extraArgs
+        allocationCid <- case result.output of
+          AllocationInstructionResult_Completed{allocationCid} -> pure allocationCid
+          _ -> fail "registry did not complete the allocation atomically"
+        exercise allocationCid Allocation_ExecuteTransfer with extraArgs
+
+spike3AtomicAllocateExecute : Script ()
+spike3AtomicAllocateExecute = do
+  registry <- AmuletRegistry.initialize AmuletRegistry.defaultAmuletRegistryConfig
+  venue <- allocatePartyExact "spike3-venue"
+  alice <- allocatePartyExact "spike3-alice"
+  bob <- allocatePartyExact "spike3-bob"
+  holdingCid <- AmuletRegistry.tapFaucet registry alice 50.0
+  holdingDisclosure <- queryDisclosure' @Amulet alice (coerceContractId holdingCid)
+  now <- getTime
+  let spec = AllocationSpecification with
+        settlement = SettlementInfo with
+          executor = venue
+          settlementRef = Reference with id = "spike3", cid = None
+          requestedAt = addRelTime now (negate (seconds 1))
+          allocateBefore = addRelTime now (minutes 5)
+          settleBefore = addRelTime now (hours 1)
+          meta = emptyMetadata
+        transferLegId = "leg"
+        transferLeg = TransferLeg with
+          sender = alice, receiver = bob, amount = 10.0
+          instrumentId = registry.instrumentId, meta = emptyMetadata
+  enriched <- RegistryApi.getAllocationFactory registry AllocationFactory_Allocate with
+    expectedAdmin = registry.dso
+    allocation = spec
+    requestedAt = spec.settlement.requestedAt
+    inputHoldingCids = [holdingCid]
+    extraArgs = emptyExtraArgs
+  -- the runner needs all three signatures; Script allows multi-party submission
+  runnerCid <- submit (actAs [venue, alice, bob]) $
+    createCmd SpikeJointRunner with venue, sender = alice, receiver = bob
+  -- KEY ASSERTION OF THE SPIKE: the execute context is the SAME pre-built
+  -- context as the allocate context (key "external-party-config-state");
+  -- no allocation cid needed to construct it.
+  result <- submitWithDisclosures' venue (enriched.disclosures <> holdingDisclosure) $
+    exerciseCmd runnerCid SpikeJointRunner_Run with
+      factoryCid = enriched.factoryCid
+      spec
+      holdingCids = [holdingCid]
+      extraArgs = enriched.arg.extraArgs
+  assertMsg "receiver got holdings" (not (null result.receiverHoldingCids))
+  WalletClient.checkBalanceApprox bob registry.instrumentId 10.0
+  WalletClient.checkBalanceApprox alice registry.instrumentId 40.0

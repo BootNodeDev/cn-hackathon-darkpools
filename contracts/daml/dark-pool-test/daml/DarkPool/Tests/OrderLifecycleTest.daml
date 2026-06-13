@@ -1,0 +1,50 @@
+module DarkPool.Tests.OrderLifecycleTest where
+
+import Daml.Script
+import Splice.Api.Token.HoldingV1 (InstrumentId(..))
+import Splice.Testing.Utils
+import DarkPool
+import DarkPool.Math
+
+orderLifecycleTest : Script ()
+orderLifecycleTest = do
+  venue <- allocatePartyExact "ol-venue"
+  alice <- allocatePartyExact "ol-alice"
+  intruder <- allocatePartyExact "ol-intruder"
+  let base = InstrumentId venue "BASE"
+  let quote = InstrumentId venue "QUOTE"
+  -- pool creation and ensure-clause guards
+  poolCid <- submit venue $ createCmd DarkPool with
+    venue, poolId = "P1", base, quote, minFillFloor = 1.0
+  submitMustFail venue $ createCmd DarkPool with
+    venue, poolId = "P1", base, quote = base, minFillFloor = 1.0      -- base == quote
+  submitMustFail venue $ createCmd DarkPool with
+    venue, poolId = "P1", base, quote, minFillFloor = 0.0             -- floor not positive
+  -- order creation and ensure-clause guards
+  -- direct creation here exercises the Order ensure + cancel/reject lifecycle
+  -- in isolation; DarkPool_PlaceOrder (funding validation) is exercised in
+  -- a later task, once TestToken provides a Holding implementation.
+  let mkOrder qty px mf = Order with
+        trader = alice, venue, poolId = "P1", base, quote
+        side = Buy, quantity = qty, limitPrice = px, minFill = mf
+        expiresAt = None, holdingCids = []
+  orderCid <- submit alice $ createCmd (mkOrder 10.0 2.0 1.0)
+  submitMustFail alice $ createCmd (mkOrder 0.0 2.0 1.0)    -- zero quantity
+  submitMustFail alice $ createCmd (mkOrder 10.0 0.0 1.0)   -- zero price
+  submitMustFail alice $ createCmd (mkOrder 10.0 2.0 0.0)   -- zero minFill
+  submitMustFail alice $ createCmd (mkOrder 10.0 2.0 11.0)  -- minFill > quantity
+  -- the dark property: venue sees the order, others do not
+  Some _ <- queryContractId venue orderCid
+  None <- queryContractId intruder orderCid
+  -- trader cancels; only the trader
+  submitMustFail venue $ exerciseCmd orderCid Order_Cancel
+  submit alice $ exerciseCmd orderCid Order_Cancel
+  -- venue rejects (housekeeping); only the venue or trader-side cancel
+  orderCid2 <- submit alice $ createCmd (mkOrder 5.0 2.0 1.0)
+  submitMustFail alice $ exerciseCmd orderCid2 Order_Reject
+  submitMustFail intruder $ exerciseCmd orderCid2 Order_Reject
+  submit venue $ exerciseCmd orderCid2 Order_Reject
+  -- both archived
+  None <- queryContractId alice orderCid
+  None <- queryContractId alice orderCid2
+  pure ()
