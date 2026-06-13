@@ -36,9 +36,7 @@ flowchart LR
     click W "wallet/"
 ```
 
-Explore the same structure interactively at **[map.darkpools.cc](https://map.darkpools.cc/)**, a drill-down atlas of the venue from the full stack down to individual modules.
-
-`wallet/` ships pre-built and has no build step; the other four are built from source (`frontend`, `backend`, and `canton-connect-kit` as npm workspaces, `contracts` as a standalone Daml project).
+You can explore the structure interactively at **[map.darkpools.cc](https://map.darkpools.cc/)**, a full atlas of the stack down to individual modules.
 
 ## Requirements
 
