@@ -38,5 +38,5 @@ test('selectFunding: insufficient holdings return null', () => {
 // Local 10dp parse to assert exact scaled values without importing internals twice.
 function parseFundingExpected(s: string): bigint {
   const [intPart, frac = ''] = s.split('.')
-  return BigInt(intPart) * 10n ** 10n + BigInt((frac + '0000000000').slice(0, 10))
+  return BigInt(intPart) * 10n ** 10n + BigInt(`${frac}0000000000`.slice(0, 10))
 }

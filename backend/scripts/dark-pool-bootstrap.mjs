@@ -61,7 +61,7 @@ const submit = async (actAs, commands) => {
 const createdCid = (events, entitySuffix) => {
   for (const e of events) {
     const c = e.CreatedEvent
-    if (c && c.templateId.endsWith(entitySuffix)) return c.contractId
+    if (c?.templateId.endsWith(entitySuffix)) return c.contractId
   }
   throw new Error(`no CreatedEvent matching ${entitySuffix} in ${JSON.stringify(events)}`)
 }
