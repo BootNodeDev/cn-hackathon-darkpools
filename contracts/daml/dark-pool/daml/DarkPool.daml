@@ -1,0 +1,351 @@
+-- | Dark pool templates: DarkPool (the venue's pool anchor), Order (the dark
+-- resting order), FillAuthority (the transient settlement-authority vehicle).
+--
+-- Production code is generic over the token-standard interfaces and imports
+-- only the token-standard API modules (Splice.Api.Token.*), never an Amulet or
+-- other registry-implementation module.
+module DarkPool where
+
+import DA.Optional (whenSome, isNone)
+import Splice.Api.Token.HoldingV1 (InstrumentId(..), Holding)
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.AllocationV1
+import Splice.Api.Token.AllocationInstructionV1
+import DarkPool.Math
+
+-- | Venue-supplied registry context for one fill: which factory to call and
+-- its off-ledger choice context. The holdings to spend are read from the order
+-- (its holdingCids field), not supplied here: in the co-hosted v1 the venue
+-- does no coin selection.
+data FundingArgs = FundingArgs with
+    allocationFactoryCid : ContractId AllocationFactory
+    allocateArgs : ExtraArgs
+  deriving (Eq, Show)
+
+-- | What one Order_Fill produced.
+data FillResult = FillResult with
+    allocationCid : ContractId Allocation
+    fillAuthorityCid : ContractId FillAuthority
+    remainderOrderCid : Optional (ContractId Order)
+  deriving (Eq, Show)
+
+-- | What one match settled.
+data MatchResult = MatchResult with
+    execPrice : Decimal
+    fillQty : Decimal
+    buyLegResult : Allocation_ExecuteTransferResult
+      -- ^ The buyer's sent leg (quote).
+    sellLegResult : Allocation_ExecuteTransferResult
+      -- ^ The seller's sent leg (base).
+    buyRemainderCid : Optional (ContractId Order)
+    sellRemainderCid : Optional (ContractId Order)
+  deriving (Eq, Show)
+
+-- | One trading pair operated by a venue. Archival pauses the pool: resting
+-- orders are unaffected, just unmatchable until the venue recreates the pool.
+template DarkPool
+  with
+    venue : Party
+    poolId : Text
+    base : InstrumentId
+    quote : InstrumentId
+    minFillFloor : Decimal
+      -- ^ Anti-dust threshold. DarkPool_PlaceOrder rejects below-floor orders at
+      -- placement; DarkPool_Match re-checks it (defending orders created by
+      -- other means, and orders that predate a floor raise), so a below-floor
+      -- order can at most rest, never match.
+  where
+    signatory venue
+    ensure base /= quote && minFillFloor > 0.0
+
+    -- | Place a dark order against this pool. The token-standard factory idiom
+    -- (cf. the registry's AllocationFactory_Allocate: a nonconsuming choice on
+    -- the admin-signed factory, exercised by the sender). The trader exercises
+    -- this on the venue-signed pool, so the body authority is {venue, trader}.
+    -- The venue's authority comes from this standing pool contract, not from
+    -- co-signing: placement needs no venue liveness. The declared funding
+    -- holdings are validated here, and poolId/base/quote are taken from the
+    -- pool (never trader-supplied), so the order is created fully
+    -- pool-consistent and adequately funded from birth. Nonconsuming: the pool
+    -- is a stable singleton (DarkPool_Match is nonconsuming too), so its cid
+    -- does not churn.
+    nonconsuming choice DarkPool_PlaceOrder : ContractId Order
+      with
+        trader : Party
+        side : Side
+        quantity : Decimal
+        limitPrice : Decimal
+        minFill : Decimal
+        expiresAt : Optional Time
+        holdingCids : [ContractId Holding]
+      controller trader
+      do
+        assertMsg "minFill meets the pool floor" (minFill >= minFillFloor)
+        -- funding instrument and worst-case amount this side must cover
+        let (fundingInstrument, required) = case side of
+              Buy -> (quote, buyFundingTarget quantity limitPrice)
+              Sell -> (base, quantity)
+        -- fetch each declared holding (the trader is the owner, hence in the
+        -- authority set) and validate it before binding it into the signed order
+        views <- forA holdingCids (\cid -> view <$> fetch cid)
+        assertMsg "every holding is owned by the trader"
+          (all (\v -> v.owner == trader) views)
+        assertMsg "every holding is the funding instrument"
+          (all (\v -> v.instrumentId == fundingInstrument) views)
+        assertMsg "no declared holding is locked" (all (\v -> isNone v.lock) views)
+        assertMsg "declared funding covers the worst-case requirement"
+          (sum (map (\v -> v.amount) views) >= required)
+        create Order with
+          trader, venue, poolId, base, quote
+          side, quantity, limitPrice, minFill, expiresAt, holdingCids
+
+    -- | Match two crossing orders and settle both legs, all in this one
+    -- transaction. The venue chooses WHICH orders to pair; everything
+    -- numerical is computed and enforced here and in the order's own
+    -- delegated choice. Nonconsuming: the pool anchors many matches.
+    nonconsuming choice DarkPool_Match : MatchResult
+      with
+        buyOrderCid : ContractId Order
+        sellOrderCid : ContractId Order
+        matchId : Text
+          -- ^ Venue-chosen unique id; namespaces the settlementRef per match.
+        requestedAt : Time
+          -- ^ Must be in the past (registries validate it too).
+        allocateBefore : Time
+          -- ^ Short window, required strictly in the future by some registries
+          -- (Amulet) and enforced by the deadline assert below. It is never the
+          -- binding constraint in the atomic flow, since allocate and execute
+          -- happen in this one transaction, but do not loosen it: the Amulet
+          -- allocate leg rejects a non-future value.
+        settleBefore : Time
+        buyFunding : FundingArgs
+        sellFunding : FundingArgs
+        buyExecuteArgs : ExtraArgs
+          -- ^ Registry context for executing the QUOTE leg (buyer sends quote).
+        sellExecuteArgs : ExtraArgs
+          -- ^ Registry context for executing the BASE leg (seller sends base).
+      controller venue
+      do
+        now <- getTime
+        buyOrder <- fetch buyOrderCid
+        sellOrder <- fetch sellOrderCid
+        assertMsg "buy order belongs to this pool"
+          (buyOrder.venue == venue && buyOrder.poolId == poolId
+            && buyOrder.base == base && buyOrder.quote == quote)
+        assertMsg "sell order belongs to this pool"
+          (sellOrder.venue == venue && sellOrder.poolId == poolId
+            && sellOrder.base == base && sellOrder.quote == quote)
+        assertMsg "opposite sides" (buyOrder.side == Buy && sellOrder.side == Sell)
+        assertMsg "no self-match" (buyOrder.trader /= sellOrder.trader)
+        assertMsg "both orders meet the pool's minFill floor"
+          (buyOrder.minFill >= minFillFloor && sellOrder.minFill >= minFillFloor)
+        assertMsg "deadlines ordered around now"
+          (requestedAt <= now && now < allocateBefore && allocateBefore <= settleBefore)
+        assertMsg "limits cross" (crosses buyOrder.limitPrice sellOrder.limitPrice)
+        let execPrice = midpointPrice buyOrder.limitPrice sellOrder.limitPrice
+        let fillQty = fillQuantity buyOrder.quantity sellOrder.quantity
+        assertMsg "fill satisfies both minFills"
+          (fillQty >= buyOrder.minFill && fillQty >= sellOrder.minFill)
+        let settlement = SettlementInfo with
+              executor = venue
+              settlementRef = Reference with
+                id = poolId <> ":" <> matchId
+                cid = Some (coerceContractId self)
+              requestedAt
+              allocateBefore
+              settleBefore
+              meta = emptyMetadata
+        -- stage 1: two sibling fill subtrees, mutually invisible
+        buyFill <- exercise buyOrderCid Order_Fill with
+          fillQty, execPrice, counterparty = sellOrder.trader
+          settlement, funding = buyFunding
+        sellFill <- exercise sellOrderCid Order_Fill with
+          fillQty, execPrice, counterparty = buyOrder.trader
+          settlement, funding = sellFunding
+        -- stage 2: joint settlement through the FillAuthority chain
+        (buyLegResult, sellLegResult) <- exercise buyFill.fillAuthorityCid FillAuthority_Settle with
+          counterFillAuthorityCid = sellFill.fillAuthorityCid
+          ownExecuteArgs = buyExecuteArgs
+          counterExecuteArgs = sellExecuteArgs
+        pure MatchResult with
+          execPrice, fillQty, buyLegResult, sellLegResult
+          buyRemainderCid = buyFill.remainderOrderCid
+          sellRemainderCid = sellFill.remainderOrderCid
+
+-- | A dark resting limit order. Visible to its trader and the venue, nobody
+-- else: that is the entire privacy mechanism. In the co-hosted v1 the funding
+-- holdings are carried on the order (holdingCids), validated at placement by
+-- DarkPool_PlaceOrder, and spent whole at fill time; see the field note.
+template Order
+  with
+    trader : Party
+    venue : Party
+    poolId : Text
+    base : InstrumentId
+      -- ^ Trader-signed binding of the traded pair: a venue exercising
+      -- Order_Fill can never point the order at different instruments.
+    quote : InstrumentId
+    side : Side
+      -- ^ Buy or Sell the base.
+    quantity : Decimal
+      -- ^ Remaining size, in base units.
+    limitPrice : Decimal
+      -- ^ Quote per base.
+    minFill : Decimal
+      -- ^ Smallest acceptable fill (anti-gaming, doubles as the dust guard).
+    expiresAt : Optional Time
+    holdingCids : [ContractId Holding]
+      -- ^ Trader-signed funding set (co-hosted v1). Fixed at placement and
+      -- validated by DarkPool_PlaceOrder; passed WHOLE to the registry factory
+      -- at fill time, so the single change holding it returns funds any
+      -- remainder (the worst-case bound carries through). If the trader moves
+      -- one of these, the next match fails closed and the trader cancels and
+      -- re-places (the accepted staleness trade-off).
+  where
+    signatory trader
+    observer venue
+    ensure quantity > 0.0 && limitPrice > 0.0
+        && minFill > 0.0 && minFill <= quantity
+        && base /= quote
+
+    choice Order_Cancel : ()
+      controller trader
+      do pure ()
+
+    -- | Venue housekeeping: clear expired or unfundable orders. The trader
+    -- witnesses the archival (signatory), so rejection is never silent.
+    choice Order_Reject : ()
+      controller venue
+      do pure ()
+
+    -- | The venue-delegated fill. Runs with {trader, venue} authority: enough
+    -- to call the registry's AllocationFactory as the sender, recreate the
+    -- remainder, and sign the FillAuthority. Everything the venue supplies is
+    -- validated here against the trader-signed order terms; a misbehaving
+    -- venue can at most create a correctly-bounded allocation (recoverable by
+    -- the trader via Allocation_Withdraw).
+    choice Order_Fill : FillResult
+      with
+        fillQty : Decimal
+        execPrice : Decimal
+        counterparty : Party
+        settlement : SettlementInfo
+        funding : FundingArgs
+      controller venue
+      do
+        now <- getTime
+        whenSome expiresAt $ \t -> assertMsg "order not expired" (now < t)
+        assertMsg "counterparty differs from trader" (counterparty /= trader)
+        assertMsg "settlement executor is the venue" (settlement.executor == venue)
+        assertMsg "fill within order bounds" (minFill <= fillQty && fillQty <= quantity)
+        assertMsg "price within limit" (priceWithinLimit side execPrice limitPrice)
+        assertMsg "positive execution price" (execPrice > 0.0)
+        let sentInstrument = case side of
+              Buy -> quote
+              Sell -> base
+        let sentAmt = sentAmount side fillQty execPrice
+        assertMsg "sent amount positive" (sentAmt > 0.0)
+        let spec = AllocationSpecification with
+              settlement
+              transferLegId = case side of
+                Buy -> "quote"
+                Sell -> "base"
+              transferLeg = TransferLeg with
+                sender = trader
+                receiver = counterparty
+                amount = sentAmt
+                instrumentId = sentInstrument
+                meta = emptyMetadata
+        result <- exercise funding.allocationFactoryCid AllocationFactory_Allocate with
+          expectedAdmin = sentInstrument.admin
+          allocation = spec
+          requestedAt = settlement.requestedAt
+          -- pass the order's WHOLE declared funding set; the factory archives
+          -- all of it and returns one change holding (no venue coin selection)
+          inputHoldingCids = holdingCids
+          extraArgs = funding.allocateArgs
+        allocationCid <- case result.output of
+          AllocationInstructionResult_Completed{allocationCid} -> pure allocationCid
+          _ -> fail "registry did not complete the allocation atomically; it cannot back the atomic dark-pool flow"
+        remainderOrderCid <- case remainderQuantity quantity fillQty minFill of
+          -- the change holding alone funds the remainder: the worst-case bound
+          -- validated at placement carries through every partial fill (floor
+          -- rounding included), so no re-selection and no re-disclosure are
+          -- needed. The change is non-empty for any partial fill of a sanely
+          -- configured pool; a degenerate sub-1e-10 remainder would just fail
+          -- closed at its next match, losing nothing (nothing is locked).
+          Some rest -> Some <$> create this with
+            quantity = rest
+            holdingCids = result.senderChangeCids
+          None -> pure None
+        fillAuthorityCid <- create FillAuthority with trader, venue, allocationCid, spec
+        pure FillResult with allocationCid, fillAuthorityCid, remainderOrderCid
+
+-- | Transient authority vehicle, created and consumed within one Match
+-- transaction. Signed by {trader, venue}, it lets the venue chain the two
+-- traders' authorities together without either trader becoming an informee of
+-- the other's fill subtree (see the module-level design note).
+--
+-- Stage 2 of the authority chain: the venue exercises Settle on one
+-- FillAuthority ({traderA, venue} available inside), which exercises
+-- SettleWith on the other with actors {venue, traderA}; inside SettleWith the
+-- authority is {traderB, venue} + {venue, traderA} = all three, exactly what
+-- Allocation_ExecuteTransfer's controller set needs. The innermost node
+-- contains only the two transfer executions: the chosen open settlement.
+template FillAuthority
+  with
+    trader : Party
+    venue : Party
+    allocationCid : ContractId Allocation
+    spec : AllocationSpecification
+      -- ^ This leg, as constructed (and validated) by Order_Fill.
+  where
+    signatory trader, venue
+
+    -- | Returns (this leg's result, counterparty leg's result).
+    choice FillAuthority_Settle : (Allocation_ExecuteTransferResult, Allocation_ExecuteTransferResult)
+      with
+        counterFillAuthorityCid : ContractId FillAuthority
+        ownExecuteArgs : ExtraArgs
+        counterExecuteArgs : ExtraArgs
+      controller venue
+      do
+        -- Note the swap: from the counter FillAuthority's perspective, "own"
+        -- is the counter leg and vice versa.
+        (counterResult, ownResult) <- exercise counterFillAuthorityCid FillAuthority_SettleWith with
+          actorTrader = trader
+          counterAllocationCid = allocationCid
+          counterSpec = spec
+          counterExecuteArgs = ownExecuteArgs
+          ownExecuteArgs = counterExecuteArgs
+        pure (ownResult, counterResult)
+
+    -- | Returns (this leg's result, counter leg's result). Validates that the
+    -- two legs form one coherent settlement before executing both transfers;
+    -- this is what stops a venue from mixing FillAuthorities of different
+    -- matches inside one hand-crafted transaction.
+    choice FillAuthority_SettleWith : (Allocation_ExecuteTransferResult, Allocation_ExecuteTransferResult)
+      with
+        actorTrader : Party
+        counterAllocationCid : ContractId Allocation
+        counterSpec : AllocationSpecification
+        ownExecuteArgs : ExtraArgs
+        counterExecuteArgs : ExtraArgs
+      controller venue, actorTrader
+      do
+        assertMsg "actor is the counter leg's sender" (actorTrader == counterSpec.transferLeg.sender)
+        assertMsg "same settlement" (counterSpec.settlement == spec.settlement)
+        assertMsg "legs mirror each other"
+          (counterSpec.transferLeg.sender == spec.transferLeg.receiver
+            && counterSpec.transferLeg.receiver == spec.transferLeg.sender
+            && counterSpec.transferLeg.sender /= spec.transferLeg.sender
+            && counterSpec.transferLegId /= spec.transferLegId)
+        counterAlloc <- fetch counterAllocationCid
+        assertMsg "counter allocation matches its spec" ((view counterAlloc).allocation == counterSpec)
+        ownAlloc <- fetch allocationCid
+        assertMsg "own allocation matches its spec" ((view ownAlloc).allocation == spec)
+        ownResult <- exercise allocationCid Allocation_ExecuteTransfer with
+          extraArgs = ownExecuteArgs
+        counterResult <- exercise counterAllocationCid Allocation_ExecuteTransfer with
+          extraArgs = counterExecuteArgs
+        pure (ownResult, counterResult)

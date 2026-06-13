@@ -1,0 +1,153 @@
+module DarkPool.Tests.AdversarialTest where
+
+import Daml.Script
+import Splice.Testing.Utils
+import DarkPool
+import DarkPool.Math
+import DarkPool.Tests.Setup
+import DarkPool.Tests.TestToken
+
+fundedBuy : TTFixture -> Party -> Decimal -> Decimal -> Decimal -> Script (ContractId Order)
+fundedBuy f trader quantity limitPrice minFill = do
+  (h, _) <- mintTT f trader "TTB" (quantity * limitPrice)
+  placeOrder f trader Buy quantity limitPrice minFill [h]
+
+fundedSell : TTFixture -> Party -> Decimal -> Decimal -> Decimal -> Script (ContractId Order)
+fundedSell f trader quantity limitPrice minFill = do
+  (h, _) <- mintTT f trader "TTA" quantity
+  placeOrder f trader Sell quantity limitPrice minFill [h]
+
+-- | Every match case here fails inside DarkPool_Match's validation
+-- (pool-membership / opposite-sides / no-self-match / minFill floor / deadlines
+-- / limits-cross / fill-satisfies-minFills), all of which run BEFORE either
+-- Order_Fill fetches a holding, so the registry disclosures alone are correct;
+-- no funding-holding disclosure is needed.
+matchMustFail : TTFixture -> ContractId Order -> ContractId Order -> Script ()
+matchMustFail f buyCid sellCid = do
+  (requestedAt, allocateBefore, settleBefore) <- matchDeadlines
+  submitWithDisclosuresMustFail' f.venue f.rulesDisclosures $
+    exerciseCmd f.poolCid DarkPool_Match with
+      buyOrderCid = buyCid
+      sellOrderCid = sellCid
+      matchId = "adv"
+      requestedAt
+      allocateBefore
+      settleBefore
+      buyFunding = ttFunding f Buy
+      sellFunding = ttFunding f Sell
+      buyExecuteArgs = emptyExtraArgs
+      sellExecuteArgs = emptyExtraArgs
+
+adversarialMatchTest : Script ()
+adversarialMatchTest = do
+  f <- setupTT
+  -- non-crossing: buy limit 1.0 vs sell limit 2.0
+  buyLow <- fundedBuy f f.alice 10.0 1.0 1.0
+  sellHigh <- fundedSell f f.bob 10.0 2.0 1.0
+  matchMustFail f buyLow sellHigh
+  -- same side: pass two buys (the second occupies the sell slot)
+  buyA <- fundedBuy f f.alice 10.0 2.0 1.0
+  buyB <- fundedBuy f f.bob 10.0 2.0 1.0
+  matchMustFail f buyA buyB
+  -- self-match: same trader on both sides (fresh buy so the case is independent)
+  buyAlice <- fundedBuy f f.alice 10.0 2.0 1.0
+  sellAlice <- fundedSell f f.alice 10.0 1.0 1.0
+  matchMustFail f buyAlice sellAlice
+  -- minFill floor: an order below the pool floor (placed by DIRECT creation,
+  -- bypassing DarkPool_PlaceOrder's floor check) can rest but never match.
+  buyDust <- submit f.alice $ createCmd Order with
+    trader = f.alice
+    venue = f.venue
+    poolId = "TTA-TTB"
+    base = f.baseId
+    quote = f.quoteId
+    side = Buy
+    quantity = 10.0
+    limitPrice = 2.0
+    minFill = 0.5
+    expiresAt = None
+    holdingCids = []
+  sellOk <- fundedSell f f.bob 10.0 1.0 1.0
+  matchMustFail f buyDust sellOk
+  -- fill below a counterparty's minFill: bob's minFill 5 > fillable 3
+  buySmall <- fundedBuy f f.alice 3.0 2.0 1.0
+  sellBigMin <- fundedSell f f.bob 10.0 1.0 5.0
+  matchMustFail f buySmall sellBigMin
+  -- wrong pool: an order for another poolId (direct creation) cannot match here
+  otherPool <- submit f.alice $ createCmd Order with
+    trader = f.alice
+    venue = f.venue
+    poolId = "OTHER-POOL"
+    base = f.baseId
+    quote = f.quoteId
+    side = Buy
+    quantity = 10.0
+    limitPrice = 2.0
+    minFill = 1.0
+    expiresAt = None
+    holdingCids = []
+  matchMustFail f otherPool sellOk
+  -- bad deadlines: requestedAt in the future
+  buyOk <- fundedBuy f f.alice 10.0 2.0 1.0
+  (_, allocateBefore, settleBefore) <- matchDeadlines
+  submitWithDisclosuresMustFail' f.venue f.rulesDisclosures $
+    exerciseCmd f.poolCid DarkPool_Match with
+      buyOrderCid = buyOk
+      sellOrderCid = sellOk
+      matchId = "adv-deadline"
+      requestedAt = settleBefore   -- deliberately in the future
+      allocateBefore
+      settleBefore
+      buyFunding = ttFunding f Buy
+      sellFunding = ttFunding f Sell
+      buyExecuteArgs = emptyExtraArgs
+      sellExecuteArgs = emptyExtraArgs
+
+venueCannotTouchHoldingsTest : Script ()
+venueCannotTouchHoldingsTest = do
+  f <- setupTT
+  (holding, _) <- mintTT f f.alice "TTB" 50.0
+  submitMustFail f.venue $ archiveCmd (fromInterfaceContractId @TestTokenHolding holding)
+
+placementValidationTest : Script ()
+placementValidationTest = do
+  f <- setupTT
+  -- below the pool's minFill floor (0.5 < 1.0). The pool is venue-signed, so the
+  -- trader exercises it against a disclosure; otherwise a plain submit would trip
+  -- a visibility error (a false pass) before reaching the funding guards.
+  (h1, _) <- mintTT f f.alice "TTB" 20.0
+  submitWithDisclosuresMustFail' f.alice f.poolDisclosure $
+    exerciseCmd f.poolCid DarkPool_PlaceOrder with
+      trader = f.alice
+      side = Buy
+      quantity = 10.0
+      limitPrice = 2.0
+      minFill = 0.5
+      expiresAt = None
+      holdingCids = [h1]
+  -- underfunded: buy 10 @2.0 needs 20 TTB, only 19 declared
+  (h2, _) <- mintTT f f.alice "TTB" 19.0
+  submitWithDisclosuresMustFail' f.alice f.poolDisclosure $
+    exerciseCmd f.poolCid DarkPool_PlaceOrder with
+      trader = f.alice
+      side = Buy
+      quantity = 10.0
+      limitPrice = 2.0
+      minFill = 1.0
+      expiresAt = None
+      holdingCids = [h2]
+  -- wrong instrument: a buy must be funded in quote (TTB), not base (TTA)
+  (h3, _) <- mintTT f f.alice "TTA" 20.0
+  submitWithDisclosuresMustFail' f.alice f.poolDisclosure $
+    exerciseCmd f.poolCid DarkPool_PlaceOrder with
+      trader = f.alice
+      side = Buy
+      quantity = 10.0
+      limitPrice = 2.0
+      minFill = 1.0
+      expiresAt = None
+      holdingCids = [h3]
+  -- a correctly funded placement succeeds (placeOrder discloses the pool itself)
+  (h4, _) <- mintTT f f.alice "TTB" 20.0
+  _ <- placeOrder f f.alice Buy 10.0 2.0 1.0 [h4]
+  pure ()

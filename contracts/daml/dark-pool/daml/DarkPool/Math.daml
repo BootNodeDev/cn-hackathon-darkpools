@@ -1,0 +1,62 @@
+-- | Pure arithmetic for the dark pool: rounding, midpoint pricing, crossing,
+-- fill and remainder logic. No ledger effects; exhaustively unit-tested.
+module DarkPool.Math where
+
+import DA.Numeric qualified as Numeric
+
+-- | Order side, from the perspective of the pool's base instrument.
+data Side = Buy | Sell
+  deriving (Eq, Show)
+
+-- | Floor an exact scale-20 value to 10 decimal places. Decimal arithmetic
+-- rounds half-even; settlement amounts must round DOWN so the direction is
+-- deterministic and conservative (the buyer's sent amount is shaved, never
+-- padded). Take the half-even cast and step one tick down if it overshot.
+floorTo10 : Numeric 20 -> Decimal
+floorTo10 exact =
+  let approx : Decimal = Numeric.castAndRound exact
+  in if (Numeric.cast approx : Numeric 20) > exact
+       then approx - 0.0000000001
+       else approx
+
+-- | Midpoint of the two limit prices, floored at 10 dp.
+midpointPrice : Decimal -> Decimal -> Decimal
+midpointPrice buyLimit sellLimit =
+  floorTo10 (Numeric.div (buyLimit + sellLimit) (2.0 : Decimal))
+
+-- | Quote units owed for a base quantity at a price, floored at 10 dp.
+quoteAmount : Decimal -> Decimal -> Decimal
+quoteAmount baseQty price = floorTo10 (Numeric.mul baseQty price)
+
+-- | A buy and a sell cross when the buyer is willing to pay at least the
+-- seller's ask.
+crosses : Decimal -> Decimal -> Bool
+crosses buyLimit sellLimit = buyLimit >= sellLimit
+
+-- | The matched quantity: the smaller of the two orders.
+fillQuantity : Decimal -> Decimal -> Decimal
+fillQuantity buyQty sellQty = min buyQty sellQty
+
+-- | Remainder to re-rest after a partial fill, or None when the tail could
+-- never fill again (smaller than the order's own minFill). Nothing is locked,
+-- so dropping the tail loses nothing.
+remainderQuantity : Decimal -> Decimal -> Decimal -> Optional Decimal
+remainderQuantity quantity fillQty minFill =
+  let rest = quantity - fillQty
+  in if rest >= minFill then Some rest else None
+
+-- | What the order's trader sends in a fill: quote (rounded down) when buying
+-- the base, the base quantity itself when selling it.
+sentAmount : Side -> Decimal -> Decimal -> Decimal
+sentAmount Buy fillQty execPrice = quoteAmount fillQty execPrice
+sentAmount Sell fillQty _execPrice = fillQty
+
+-- | Worst-case quote funding a buy order can need: the midpoint can only be at
+-- or below the buyer's limit, and quoteAmount is monotone in price.
+buyFundingTarget : Decimal -> Decimal -> Decimal
+buyFundingTarget quantity limitPrice = quoteAmount quantity limitPrice
+
+-- | Does an execution price respect the order's limit?
+priceWithinLimit : Side -> Decimal -> Decimal -> Bool
+priceWithinLimit Buy execPrice limitPrice = execPrice <= limitPrice
+priceWithinLimit Sell execPrice limitPrice = execPrice >= limitPrice

@@ -1,0 +1,58 @@
+-- | Privacy assertions, within IDE-ledger semantics: Daml Script queries
+-- respect stakeholder visibility, so "party X cannot query Y" is meaningful.
+-- Participant-level data availability (disclosure necessity) cannot be
+-- asserted on the single-store IDE ledger; that is a documented limitation,
+-- mitigated by the deliberate disclosure protocol exercised in every test.
+module DarkPool.Tests.PrivacyTest where
+
+import DA.Assert ((===))
+import Daml.Script
+import Splice.Testing.Utils
+import DarkPool
+import DarkPool.Math
+import DarkPool.Tests.Setup
+import DarkPool.Tests.TestToken
+
+privacyTest : Script ()
+privacyTest = do
+  f <- setupTT
+  intruder <- allocatePartyExact "privacy-intruder"
+  -- resting orders: trader + venue only. Fund first, then place orders
+  -- carrying the funding; capture both holding disclosures because the match
+  -- below is a SUCCESSFUL partial fill whose registry factories must fetch
+  -- alice's quote funding and bob's base funding.
+  (aliceQuote, aliceDisc) <- mintTT f f.alice "TTB" 20.0
+  (bobBase, bobDisc) <- mintTT f f.bob "TTA" 4.0
+  buyCid <- placeOrder f f.alice Buy 10.0 2.0 2.0 [aliceQuote]
+  sellCid <- placeOrder f f.bob Sell 4.0 1.0 1.0 [bobBase]
+  None <- queryContractId f.bob buyCid        -- counterparty cannot see the book
+  None <- queryContractId intruder buyCid
+  Some _ <- queryContractId f.venue buyCid
+  -- match partially: alice's remainder (6) must stay invisible to bob
+  (requestedAt, allocateBefore, settleBefore) <- matchDeadlines
+  result <- submitWithDisclosures' f.venue (f.rulesDisclosures <> aliceDisc <> bobDisc) $
+    exerciseCmd f.poolCid DarkPool_Match with
+      buyOrderCid = buyCid
+      sellOrderCid = sellCid
+      matchId = "priv"
+      requestedAt, allocateBefore, settleBefore
+      buyFunding = ttFunding f Buy
+      sellFunding = ttFunding f Sell
+      buyExecuteArgs = emptyExtraArgs
+      sellExecuteArgs = emptyExtraArgs
+  Some remainderCid <- pure result.buyRemainderCid
+  -- the remainder order: alice + venue see it, bob and outsiders never
+  Some _ <- queryContractId f.alice remainderCid
+  Some _ <- queryContractId f.venue remainderCid
+  None <- queryContractId f.bob remainderCid
+  None <- queryContractId intruder remainderCid
+  -- bob's whole view of the order book is empty (his sell was consumed)
+  bobOrders <- query @Order f.bob
+  bobOrders === []
+  -- settlement outputs landed with the right owners and nobody else
+  aliceBase <- ttBalance f.alice "TTA"
+  aliceBase === 4.0
+  bobQuote <- ttBalance f.bob "TTB"
+  bobQuote === 6.0
+  intruderView <- query @TestTokenHolding intruder
+  intruderView === []

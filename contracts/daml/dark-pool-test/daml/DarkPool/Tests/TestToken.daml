@@ -1,0 +1,131 @@
+-- | A minimal token registry implementing the token-standard Holding,
+-- AllocationFactory and Allocation interfaces. Exists so the integration suite
+-- exercises the dark pool against a second, independent registry next to
+-- Amulet: the strongest available test of registry-agnosticism.
+--
+-- Simplifications (fine for a test registry): holdings are signed by the admin
+-- only (owner is an observer), allocations hold escrowed value implicitly
+-- (inputs are archived, no on-ledger escrow holding), no locks, no fees.
+module DarkPool.Tests.TestToken where
+
+import DA.Foldable (forA_)
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.HoldingV1
+import Splice.Api.Token.AllocationV1
+import Splice.Api.Token.AllocationInstructionV1
+
+template TestTokenHolding
+  with
+    admin : Party
+    owner : Party
+    symbol : Text
+    amount : Decimal
+  where
+    signatory admin
+    observer owner
+    ensure amount > 0.0
+
+    interface instance Holding for TestTokenHolding where
+      view = HoldingView with
+        owner
+        instrumentId = InstrumentId admin symbol
+        amount
+        lock = None
+        meta = emptyMetadata
+
+template TestTokenRules
+  with
+    admin : Party
+    symbol : Text
+  where
+    signatory admin
+
+    interface instance AllocationFactory for TestTokenRules where
+      view = AllocationFactoryView with admin, meta = emptyMetadata
+
+      allocationFactory_allocateImpl _self arg = do
+        now <- getTime
+        let spec = arg.allocation
+        let leg = spec.transferLeg
+        assertMsg "TestToken: expectedAdmin matches" (arg.expectedAdmin == admin)
+        assertMsg "TestToken: instrument is ours" (leg.instrumentId == InstrumentId admin symbol)
+        assertMsg "TestToken: positive amount" (leg.amount > 0.0)
+        assertMsg "TestToken: requestedAt in the past" (arg.requestedAt <= now)
+        assertMsg "TestToken: allocateBefore in the future" (now < spec.settlement.allocateBefore)
+        assertMsg "TestToken: deadlines ordered"
+          (spec.settlement.allocateBefore <= spec.settlement.settleBefore)
+        assertMsg "TestToken: at least one funding holding" (not (null arg.inputHoldingCids))
+        -- consume the inputs (the standard requires archiving all of them so
+        -- duplicate allocations contend on the holdings)
+        holdings <- forA arg.inputHoldingCids $ \cid -> do
+          let tcid = fromInterfaceContractId @TestTokenHolding cid
+          h <- fetch tcid
+          assertMsg "TestToken: holding is ours and the sender's"
+            (h.admin == admin && h.symbol == symbol && h.owner == leg.sender)
+          pure (tcid, h)
+        forA_ holdings $ \(tcid, _) -> archive tcid
+        let total = sum (map (\(_, h) -> h.amount) holdings)
+        assertMsg "TestToken: sufficient funding" (total >= leg.amount)
+        senderChangeCids <-
+          if total > leg.amount
+            then do
+              changeCid <- create TestTokenHolding with
+                admin, owner = leg.sender, symbol, amount = total - leg.amount
+              pure [toInterfaceContractId @Holding changeCid]
+            else pure []
+        allocCid <- create TestTokenAllocation with admin, spec
+        pure AllocationInstructionResult with
+          output = AllocationInstructionResult_Completed with
+            allocationCid = toInterfaceContractId @Allocation allocCid
+          senderChangeCids
+          meta = emptyMetadata
+
+      allocationFactory_publicFetchImpl _self arg = do
+        assertMsg "TestToken: expectedAdmin matches" (arg.expectedAdmin == admin)
+        pure AllocationFactoryView with admin, meta = emptyMetadata
+
+-- | Recreate the escrowed value as a fresh holding back to the sender. Cancel
+-- and withdraw recover identically: this test registry keeps no on-ledger
+-- escrow holding, so both paths simply re-mint the sender's funds.
+recoverToSender : Party -> AllocationSpecification -> Update (ContractId Holding)
+recoverToSender admin spec = do
+  cid <- create TestTokenHolding with
+    admin
+    owner = spec.transferLeg.sender
+    symbol = spec.transferLeg.instrumentId.id
+    amount = spec.transferLeg.amount
+  pure (toInterfaceContractId @Holding cid)
+
+template TestTokenAllocation
+  with
+    admin : Party
+    spec : AllocationSpecification
+  where
+    signatory admin, spec.transferLeg.sender
+    observer spec.settlement.executor
+
+    interface instance Allocation for TestTokenAllocation where
+      view = AllocationView with allocation = spec, holdingCids = [], meta = emptyMetadata
+
+      allocation_executeTransferImpl _self _arg = do
+        now <- getTime
+        assertMsg "TestToken: settleBefore not passed" (now < spec.settlement.settleBefore)
+        receiverCid <- create TestTokenHolding with
+          admin
+          owner = spec.transferLeg.receiver
+          symbol = spec.transferLeg.instrumentId.id
+          amount = spec.transferLeg.amount
+        pure Allocation_ExecuteTransferResult with
+          senderHoldingCids = []
+          receiverHoldingCids = [toInterfaceContractId @Holding receiverCid]
+          meta = emptyMetadata
+
+      allocation_cancelImpl _self _arg = do
+        cid <- recoverToSender admin spec
+        pure Allocation_CancelResult with
+          senderHoldingCids = [cid], meta = emptyMetadata
+
+      allocation_withdrawImpl _self _arg = do
+        cid <- recoverToSender admin spec
+        pure Allocation_WithdrawResult with
+          senderHoldingCids = [cid], meta = emptyMetadata

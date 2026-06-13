@@ -1,0 +1,96 @@
+module DarkPool.Tests.TestTokenRegistryTest where
+
+import DA.Assert ((===))
+import DA.Time
+import Daml.Script
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.HoldingV1
+import Splice.Api.Token.AllocationV1
+import Splice.Api.Token.AllocationInstructionV1
+import Splice.Testing.Utils
+import DarkPool.Tests.TestToken
+
+testTokenRoundTrip : Script ()
+testTokenRoundTrip = do
+  admin <- allocatePartyExact "tt-admin"
+  alice <- allocatePartyExact "tt-alice"
+  bob <- allocatePartyExact "tt-bob"
+  executor <- allocatePartyExact "tt-executor"
+  rulesCid <- submit admin $ createCmd TestTokenRules with admin, symbol = "TUSD"
+  -- the factory contract is admin-signed; a real wallet acquires it via
+  -- disclosure from the registry. Mirror that here so the sender can exercise it.
+  rulesDisclosure <- queryDisclosure' @TestTokenRules admin rulesCid
+  let instrument = InstrumentId admin "TUSD"
+  h1 <- submit admin $ createCmd TestTokenHolding with admin, owner = alice, symbol = "TUSD", amount = 30.0
+  h2 <- submit admin $ createCmd TestTokenHolding with admin, owner = alice, symbol = "TUSD", amount = 20.0
+  now <- getTime
+  let spec = AllocationSpecification with
+        settlement = SettlementInfo with
+          executor
+          settlementRef = Reference with id = "ttrt", cid = None
+          requestedAt = addRelTime now (negate (seconds 1))
+          allocateBefore = addRelTime now (minutes 5)
+          settleBefore = addRelTime now (hours 1)
+          meta = emptyMetadata
+        transferLegId = "leg"
+        transferLeg = TransferLeg with
+          sender = alice, receiver = bob, amount = 35.0, instrumentId = instrument, meta = emptyMetadata
+  -- allocate: consumes both holdings (50), escrows 35, returns 15 change
+  result <- submitWithDisclosures' alice rulesDisclosure $ exerciseCmd (toInterfaceContractId @AllocationFactory rulesCid)
+    AllocationFactory_Allocate with
+      expectedAdmin = admin
+      allocation = spec
+      requestedAt = spec.settlement.requestedAt
+      inputHoldingCids = map (toInterfaceContractId @Holding) [h1, h2]
+      extraArgs = emptyExtraArgs
+  allocCid <- case result.output of
+    AllocationInstructionResult_Completed{allocationCid} -> pure allocationCid
+    _ -> fail "TestToken must complete allocations atomically"
+  length result.senderChangeCids === 1
+  -- inputs are gone (deliberate contention on holdings)
+  None <- queryContractId alice h1
+  None <- queryContractId alice h2
+  -- wrong expectedAdmin must fail
+  h3 <- submit admin $ createCmd TestTokenHolding with admin, owner = alice, symbol = "TUSD", amount = 40.0
+  submitWithDisclosuresMustFail' alice rulesDisclosure $ exerciseCmd (toInterfaceContractId @AllocationFactory rulesCid)
+    AllocationFactory_Allocate with
+      expectedAdmin = alice
+      allocation = spec
+      requestedAt = spec.settlement.requestedAt
+      inputHoldingCids = [toInterfaceContractId @Holding h3]
+      extraArgs = emptyExtraArgs
+  -- underfunded must fail (h3 has 40 but spec wants 35: make a smaller one)
+  h4 <- submit admin $ createCmd TestTokenHolding with admin, owner = alice, symbol = "TUSD", amount = 5.0
+  submitWithDisclosuresMustFail' alice rulesDisclosure $ exerciseCmd (toInterfaceContractId @AllocationFactory rulesCid)
+    AllocationFactory_Allocate with
+      expectedAdmin = admin
+      allocation = spec
+      requestedAt = spec.settlement.requestedAt
+      inputHoldingCids = [toInterfaceContractId @Holding h4]
+      extraArgs = emptyExtraArgs
+  -- execute needs all three controllers; executor alone must fail
+  submitMustFail executor $ exerciseCmd allocCid
+    Allocation_ExecuteTransfer with extraArgs = emptyExtraArgs
+  execResult <- submit (actAs [executor, alice, bob]) $ exerciseCmd allocCid
+    Allocation_ExecuteTransfer with extraArgs = emptyExtraArgs
+  length execResult.receiverHoldingCids === 1
+  -- bob holds 35
+  bobHoldings <- query @TestTokenHolding bob
+  sum (map (\(_, h) -> h.amount) (filter (\(_, h) -> h.owner == bob) bobHoldings)) === 35.0
+  -- withdraw path: sender can recover a fresh allocation alone
+  h5 <- submit admin $ createCmd TestTokenHolding with admin, owner = alice, symbol = "TUSD", amount = 35.0
+  result2 <- submitWithDisclosures' alice rulesDisclosure $ exerciseCmd (toInterfaceContractId @AllocationFactory rulesCid)
+    AllocationFactory_Allocate with
+      expectedAdmin = admin
+      allocation = spec
+      requestedAt = spec.settlement.requestedAt
+      inputHoldingCids = [toInterfaceContractId @Holding h5]
+      extraArgs = emptyExtraArgs
+  allocCid2 <- case result2.output of
+    AllocationInstructionResult_Completed{allocationCid} -> pure allocationCid
+    _ -> fail "TestToken must complete allocations atomically"
+  _ <- submit alice $ exerciseCmd allocCid2
+    Allocation_Withdraw with extraArgs = emptyExtraArgs
+  aliceHoldings <- query @TestTokenHolding alice
+  assertMsg "alice recovered her 35"
+    (any (\(_, h) -> h.owner == alice && h.amount == 35.0) aliceHoldings)
