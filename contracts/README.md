@@ -105,19 +105,6 @@ The npm scripts are the canonical build and test entry points (they wrap `dpm`).
 | `npm run test:coverage` | run the dark-pool suite with a choice-coverage report. This is the source for the production-choice figure: it filters out `Archive` and `splice` noise, leaving the seven dark-pool business choices (all exercised). A plain `npm test` reports a different, unfiltered number that also counts the test harness templates. |
 | `npm run clean` | remove all four .daml build directories |
 
-## Status
-
-v1 is Daml plus Daml Script tests. The topology is co-hosted (venue and traders
-share a validator), funding holdings are carried on the order, and there is one
-accepted trade-off: if a trader moves a declared holding out from under a resting
-order, the next match against it fails closed on the now-inactive input, and the
-trader cancels and re-places with fresh funding. There is no venue-side funding
-refresh in v1.
-
-Off-ledger daemons (a matching engine, a settlement submitter), a user
-interface, and the trust-minimized own-validator topology with an explicit
-off-ledger funding-disclosure channel are future work.
-
 ## License
 
 MIT. See `LICENSE`.
