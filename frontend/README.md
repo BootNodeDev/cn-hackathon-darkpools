@@ -9,22 +9,21 @@ The privacy isn't a feature bolted on top. Canton only shows each party the
 contracts it is a party to, so a trader sees their own orders and fills, the
 venue sees the book it needs to run matching, and everyone else sees nothing.
 
-## Status: the trading is mocked
+Live at https://darkpools.cc/.
 
-The wallet connection (Carpincho) is real. Everything else: the order book,
-balances, matching, the price chart, is simulated in the browser so you can
-click around the whole app before the backend is wired up. A small engine seeds
-a few counterparties and runs the matcher on a timer, so the book and fills move
-on their own.
+## How it connects
 
-All of that data flows through one `DarkPoolClient` interface
-(`src/darkpool/`). Today a `MockDarkPoolClient` backs it; swapping in a real
-ledger-backed client later is a one-file change and the UI doesn't notice.
+The app talks to Carpincho for the wallet and to the dark pool service
+([`../backend/`](../backend/)) for everything else: the order book, balances,
+matching, and settled trades. All of that flows through one `DarkPoolClient`
+interface (`src/darkpool/`), so the views never care where the data comes from.
+A `MockDarkPoolClient` implements the same interface and runs the whole app in
+the browser, seeded counterparties and a matcher on a timer included, so you can
+develop the UI offline with no backend running.
 
-The model and the operations mirror the
-[cn-dark-pool-contracts](https://github.com/BootNodeDev/cn-dark-pool-contracts)
-Daml package: limit orders with a minimum fill and optional expiry, midpoint
-pricing, atomic settlement, and self-funded remainders that re-rest.
+The model and the operations mirror the [`../contracts/`](../contracts/) Daml
+package: limit orders with a minimum fill and optional expiry, midpoint pricing,
+atomic settlement, and self-funded remainders that re-rest.
 
 ## Running it
 
@@ -56,10 +55,12 @@ the backend with `npm run backend:up`.
   order (side, limit price, quantity, minimum fill, optional expiry), and watch
   your open orders and fills. The "shielded book" panel is intentionally blurred:
   there is no public depth to show.
-- **`/venue`** is the operator's view. The full resting book, plus a panel to
-  pick a crossing buy and sell and settle them at the midpoint. It isn't linked
-  from the nav on purpose; reach it by typing the URL. On the real ledger only
-  the venue's own wallet can see this data.
+- **`/venue`** is the operator's view: the full resting book, the settled
+  matches, and a **Run matching pass** button. The venue scans the book
+  off-chain and picks crossing pairs; the contract sets the midpoint price and
+  either moves both legs atomically or rejects the match. It isn't linked from
+  the nav on purpose; reach it by typing the URL. Only the venue's own wallet
+  can see this data.
 
 ## Working on it
 

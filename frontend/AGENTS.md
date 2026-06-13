@@ -4,15 +4,15 @@ This file applies only to `frontend/`. For monorepo-wide rules, see [`../AGENTS.
 
 ## Scope
 
-The dark pool trading dApp. Two views: the trader view (`/`) for placing and watching private orders, and the venue view (`/venue`) for the operator to inspect the full book and trigger matching. The UI runs against a `MockDarkPoolClient` by default; the live path swaps in an `HttpDarkPoolClient` backed by `backend/`.
+The dark pool trading dApp. Two views: the trader view (`/`) for placing and watching private orders, and the venue view (`/venue`) for the operator to inspect the full book and trigger matching. The UI reads from the `backend/` dark pool service through the `DarkPoolClient` interface; a mock client backs offline development.
 
 ## Working Rules
 
 - Keep the `DarkPoolClient` interface as the abstraction boundary between the UI and the data layer. Components must not reach past it into mock or HTTP internals.
 - All Canton wallet interactions go through `canton-connect-kit` hooks (`useConnect`, `useParty`, `useWalletStatus`, `useExecute`). Do not call `@canton-network/dapp-sdk` directly from components.
-- The venue view (`/venue`) is operator-only -- it is not linked from nav. Only the venue's wallet can see full book data on a live ledger; the mock returns everything.
-- Pricing and matching math lives in `src/darkpool/darkpoolMath.ts` and must stay covered by tests. Do not move it inline into components.
-- Use relative imports with explicit `.ts` / `.tsx` extensions.
+- The venue view (`/venue`) is operator-only -- it is not linked from nav. Only the venue's wallet sees full book data; the backend's `/venue` endpoint is the operator-only surface.
+- Pricing and formatting helpers live in `src/darkpool/` (`darkpoolMath.ts`, `format.ts`) and must stay covered by tests. Do not move them inline into components.
+- Use the `@/` alias for every import that resolves inside `src/`. Never include the file extension -- Biome's `noRestrictedImports` rejects both relative `src` paths and `.ts`/`.tsx` suffixes (see the root `biome.json` override). Tests are exempt from the alias rule.
 
 ## Architecture
 
