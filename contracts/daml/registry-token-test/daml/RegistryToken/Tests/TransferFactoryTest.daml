@@ -1,0 +1,99 @@
+module RegistryToken.Tests.TransferFactoryTest where
+
+import DA.Assert ((===))
+import DA.Time
+import Daml.Script
+import Splice.Api.Token.HoldingV1
+import Splice.Api.Token.MetadataV1 (emptyMetadata)
+import Splice.Api.Token.TransferInstructionV1
+import Splice.Testing.Utils
+import RegistryToken.Holding (RegistryHolding)
+import RegistryToken.Registry
+import RegistryToken.Tests.Setup
+
+-- | Build a standard transfer with deadlines around `now`.
+mkTransfer : Party -> Party -> InstrumentId -> Decimal -> [ContractId Holding] -> Time -> Transfer
+mkTransfer sender receiver instrumentId amount inputHoldingCids now =
+  Transfer with
+    sender, receiver, amount, instrumentId, inputHoldingCids
+    requestedAt = addRelTime now (negate (seconds 1))
+    executeBefore = addRelTime now (minutes 5)
+    meta = emptyMetadata
+
+-- | A transfer completes immediately: the receiver gets the amount, the sender
+-- gets change.
+transferCompletesTest : Script ()
+transferCompletesTest = do
+  w <- setup
+  now <- getTime
+  h <- mint w w.alice w.usdx 50.0
+  let t = mkTransfer w.alice w.bob w.usdx 35.0 [h] now
+  result <- submitWithDisclosures' w.alice w.registryDisc $
+    exerciseCmd (toInterfaceContractId @TransferFactory w.registry)
+      TransferFactory_Transfer with
+        expectedAdmin = w.admin, transfer = t, extraArgs = emptyExtraArgs
+  case result.output of
+    TransferInstructionResult_Completed{receiverHoldingCids} ->
+      length receiverHoldingCids === 1
+    _ -> fail "registry must complete transfers atomically"
+  length result.senderChangeCids === 1
+  -- the funding holding was consumed (archived) so duplicate transfers contend
+  None <- queryContractId w.alice (fromInterfaceContractId @RegistryHolding h)
+  bobBal <- balance w.bob w.usdx
+  bobBal === 35.0
+  aliceBal <- balance w.alice w.usdx
+  aliceBal === 15.0
+
+-- | An exact-amount transfer mints no change holding.
+transferExactAmountNoChange : Script ()
+transferExactAmountNoChange = do
+  w <- setup
+  now <- getTime
+  h <- mint w w.alice w.usdx 35.0
+  let t = mkTransfer w.alice w.bob w.usdx 35.0 [h] now
+  result <- submitWithDisclosures' w.alice w.registryDisc $
+    exerciseCmd (toInterfaceContractId @TransferFactory w.registry)
+      TransferFactory_Transfer with
+        expectedAdmin = w.admin, transfer = t, extraArgs = emptyExtraArgs
+  length result.senderChangeCids === 0
+  bobBal <- balance w.bob w.usdx
+  bobBal === 35.0
+  aliceBal <- balance w.alice w.usdx
+  aliceBal === 0.0
+
+-- | Underfunded inputs are rejected.
+transferUnderfundedFails : Script ()
+transferUnderfundedFails = do
+  w <- setup
+  now <- getTime
+  h <- mint w w.alice w.usdx 5.0    -- 5 < 35
+  let t = mkTransfer w.alice w.bob w.usdx 35.0 [h] now
+  submitWithDisclosuresMustFail' w.alice w.registryDisc $
+    exerciseCmd (toInterfaceContractId @TransferFactory w.registry)
+      TransferFactory_Transfer with
+        expectedAdmin = w.admin, transfer = t, extraArgs = emptyExtraArgs
+
+-- | A transfer whose executeBefore is already in the past is rejected.
+transferExpiredFails : Script ()
+transferExpiredFails = do
+  w <- setup
+  now <- getTime
+  h <- mint w w.alice w.usdx 50.0
+  let t = (mkTransfer w.alice w.bob w.usdx 35.0 [h] now) with
+            executeBefore = addRelTime now (negate (seconds 1))
+  submitWithDisclosuresMustFail' w.alice w.registryDisc $
+    exerciseCmd (toInterfaceContractId @TransferFactory w.registry)
+      TransferFactory_Transfer with
+        expectedAdmin = w.admin, transfer = t, extraArgs = emptyExtraArgs
+
+-- | A wrong expectedAdmin is rejected.
+transferWrongAdminFails : Script ()
+transferWrongAdminFails = do
+  w <- setup
+  now <- getTime
+  h <- mint w w.alice w.usdx 50.0
+  let t = mkTransfer w.alice w.bob w.usdx 35.0 [h] now
+  submitWithDisclosuresMustFail' w.alice w.registryDisc $
+    exerciseCmd (toInterfaceContractId @TransferFactory w.registry)
+      TransferFactory_Transfer with
+        expectedAdmin = w.alice, transfer = t, extraArgs = emptyExtraArgs

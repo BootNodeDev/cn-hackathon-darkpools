@@ -1,0 +1,94 @@
+module RegistryToken.Tests.AllocationFactoryTest where
+
+import DA.Assert ((===))
+import Daml.Script
+import Splice.Api.Token.HoldingV1
+import Splice.Api.Token.AllocationV1
+import Splice.Api.Token.AllocationInstructionV1
+import Splice.Testing.Utils
+import RegistryToken.Holding (RegistryHolding)
+import RegistryToken.Registry
+import RegistryToken.Tests.Setup
+
+-- | Allocate consumes the funding holdings, escrows the leg amount, returns
+-- change, and the resulting allocation executes to the receiver.
+allocateRoundTripTest : Script ()
+allocateRoundTripTest = do
+  w <- setup
+  now <- getTime
+  h1 <- mint w w.alice w.usdx 30.0
+  h2 <- mint w w.alice w.usdx 20.0
+  let spec = allocSpec w.alice w.bob w.executor w.usdx 35.0 now
+  result <- submitWithDisclosures' w.alice w.registryDisc $
+    exerciseCmd (toInterfaceContractId @AllocationFactory w.registry)
+      AllocationFactory_Allocate with
+        expectedAdmin = w.admin
+        allocation = spec
+        requestedAt = spec.settlement.requestedAt
+        inputHoldingCids = [h1, h2]
+        extraArgs = emptyExtraArgs
+  allocCid <- case result.output of
+    AllocationInstructionResult_Completed{allocationCid} -> pure allocationCid
+    _ -> fail "registry must complete allocations atomically"
+  length result.senderChangeCids === 1   -- 50 in, 35 allocated, 15 change
+  -- the funding holdings were consumed (archived) so duplicate allocations contend
+  None <- queryContractId w.alice (fromInterfaceContractId @RegistryHolding h1)
+  None <- queryContractId w.alice (fromInterfaceContractId @RegistryHolding h2)
+  aliceChange <- balance w.alice w.usdx
+  aliceChange === 15.0
+  -- execute delivers 35 to bob
+  _ <- submit (actAs [w.executor, w.alice, w.bob]) $
+    exerciseCmd allocCid Allocation_ExecuteTransfer with extraArgs = emptyExtraArgs
+  bobBal <- balance w.bob w.usdx
+  bobBal === 35.0
+
+-- | A wrong expectedAdmin is rejected.
+allocateWrongAdminFails : Script ()
+allocateWrongAdminFails = do
+  w <- setup
+  now <- getTime
+  h <- mint w w.alice w.usdx 40.0
+  let spec = allocSpec w.alice w.bob w.executor w.usdx 35.0 now
+  submitWithDisclosuresMustFail' w.alice w.registryDisc $
+    exerciseCmd (toInterfaceContractId @AllocationFactory w.registry)
+      AllocationFactory_Allocate with
+        expectedAdmin = w.alice   -- not the registry admin
+        allocation = spec
+        requestedAt = spec.settlement.requestedAt
+        inputHoldingCids = [h]
+        extraArgs = emptyExtraArgs
+
+-- | Underfunded inputs are rejected.
+allocateUnderfundedFails : Script ()
+allocateUnderfundedFails = do
+  w <- setup
+  now <- getTime
+  h <- mint w w.alice w.usdx 5.0    -- 5 < 35
+  let spec = allocSpec w.alice w.bob w.executor w.usdx 35.0 now
+  submitWithDisclosuresMustFail' w.alice w.registryDisc $
+    exerciseCmd (toInterfaceContractId @AllocationFactory w.registry)
+      AllocationFactory_Allocate with
+        expectedAdmin = w.admin
+        allocation = spec
+        requestedAt = spec.settlement.requestedAt
+        inputHoldingCids = [h]
+        extraArgs = emptyExtraArgs
+
+-- | An exact-amount allocation mints no change holding.
+allocateExactAmountNoChange : Script ()
+allocateExactAmountNoChange = do
+  w <- setup
+  now <- getTime
+  h <- mint w w.alice w.usdx 35.0
+  let spec = allocSpec w.alice w.bob w.executor w.usdx 35.0 now
+  result <- submitWithDisclosures' w.alice w.registryDisc $
+    exerciseCmd (toInterfaceContractId @AllocationFactory w.registry)
+      AllocationFactory_Allocate with
+        expectedAdmin = w.admin
+        allocation = spec
+        requestedAt = spec.settlement.requestedAt
+        inputHoldingCids = [h]
+        extraArgs = emptyExtraArgs
+  length result.senderChangeCids === 0
+  aliceChange <- balance w.alice w.usdx
+  aliceChange === 0.0

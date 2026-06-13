@@ -1,0 +1,52 @@
+-- | Production minimal-registry allocation. Created by the Registry factory when
+-- a sender allocates funds to a settlement leg; archived on execute / cancel /
+-- withdraw. Like the holding it carries no on-ledger escrow contract: execute
+-- mints the receiver's holding, cancel and withdraw re-mint the sender's funds.
+module RegistryToken.Allocation where
+
+import Splice.Api.Token.MetadataV1 (emptyMetadata)
+import Splice.Api.Token.HoldingV1 (Holding)
+import Splice.Api.Token.AllocationV1
+import RegistryToken.Holding (RegistryHolding(..))
+
+-- | Re-mint the escrowed value as a fresh holding back to the sender. Cancel and
+-- withdraw recover identically: this registry keeps no on-ledger escrow holding.
+-- The factory escrows exactly `transferLeg.amount` (and never over-allocates), so
+-- re-minting that amount conserves value on recovery.
+recoverToSender : AllocationSpecification -> Update (ContractId Holding)
+recoverToSender spec = do
+  cid <- create RegistryHolding with
+    instrumentId = spec.transferLeg.instrumentId
+    owner = spec.transferLeg.sender
+    amount = spec.transferLeg.amount
+  pure (toInterfaceContractId @Holding cid)
+
+template RegistryAllocation
+  with
+    spec : AllocationSpecification
+  where
+    signatory spec.transferLeg.instrumentId.admin, spec.transferLeg.sender
+    observer spec.settlement.executor
+
+    interface instance Allocation for RegistryAllocation where
+      view = AllocationView with allocation = spec, holdingCids = [], meta = emptyMetadata
+
+      allocation_executeTransferImpl _self _arg = do
+        now <- getTime
+        assertMsg "RegistryToken: settleBefore not passed" (now < spec.settlement.settleBefore)
+        receiverCid <- create RegistryHolding with
+          instrumentId = spec.transferLeg.instrumentId
+          owner = spec.transferLeg.receiver
+          amount = spec.transferLeg.amount
+        pure Allocation_ExecuteTransferResult with
+          senderHoldingCids = []
+          receiverHoldingCids = [toInterfaceContractId @Holding receiverCid]
+          meta = emptyMetadata
+
+      allocation_cancelImpl _self _arg = do
+        cid <- recoverToSender spec
+        pure Allocation_CancelResult with senderHoldingCids = [cid], meta = emptyMetadata
+
+      allocation_withdrawImpl _self _arg = do
+        cid <- recoverToSender spec
+        pure Allocation_WithdrawResult with senderHoldingCids = [cid], meta = emptyMetadata

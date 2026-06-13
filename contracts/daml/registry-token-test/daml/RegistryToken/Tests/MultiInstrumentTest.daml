@@ -1,0 +1,41 @@
+module RegistryToken.Tests.MultiInstrumentTest where
+
+import DA.Assert ((===))
+import Daml.Script
+import Splice.Api.Token.AllocationV1
+import Splice.Api.Token.AllocationInstructionV1
+import Splice.Testing.Utils
+import RegistryToken.Registry
+import RegistryToken.Tests.Setup
+
+-- | One Registry contract serves both USDX and EURX: mint both, settle a USDX
+-- allocation alice -> bob, and confirm balances per instrument are independent.
+oneRegistryTwoInstrumentsTest : Script ()
+oneRegistryTwoInstrumentsTest = do
+  w <- setup
+  now <- getTime
+  -- the same registry mints two different instruments
+  _ <- mint w w.alice w.eurx 200.0
+  hUsdx <- mint w w.alice w.usdx 60.0
+  -- allocate + execute USDX from the same registry
+  let spec = allocSpec w.alice w.bob w.executor w.usdx 60.0 now
+  result <- submitWithDisclosures' w.alice w.registryDisc $
+    exerciseCmd (toInterfaceContractId @AllocationFactory w.registry)
+      AllocationFactory_Allocate with
+        expectedAdmin = w.admin
+        allocation = spec
+        requestedAt = spec.settlement.requestedAt
+        inputHoldingCids = [hUsdx]
+        extraArgs = emptyExtraArgs
+  allocCid <- case result.output of
+    AllocationInstructionResult_Completed{allocationCid} -> pure allocationCid
+    _ -> fail "registry must complete allocations atomically"
+  _ <- submit (actAs [w.executor, w.alice, w.bob]) $
+    exerciseCmd allocCid Allocation_ExecuteTransfer with extraArgs = emptyExtraArgs
+  -- bob received USDX; the EURX holding is untouched and independent
+  bobUsdx <- balance w.bob w.usdx
+  bobUsdx === 60.0
+  aliceUsdx <- balance w.alice w.usdx
+  aliceUsdx === 0.0
+  aliceEurx <- balance w.alice w.eurx
+  aliceEurx === 200.0
