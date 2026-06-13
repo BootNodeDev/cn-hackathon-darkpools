@@ -1,0 +1,27 @@
+{
+  "name": "cn-hackathon-darkpools",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "backend:dev": "npm --prefix backend run dev",
+    "backend:test": "npm --prefix backend test",
+    "app:dev": "npm --prefix frontend run dev -- --host localhost --port 3012 --strictPort",
+    "lint": "biome check",
+    "lint:fix": "biome check --write",
+    "format": "biome format --write",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.15",
+    "@commitlint/cli": "^21.0.1",
+    "@commitlint/config-conventional": "^21.0.1",
+    "@mermaid-js/mermaid-cli": "^11.15.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.4"
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "vcs": {
+    "clientKind": "git",
+    "enabled": true,
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": [
+      "backend/**",
+      "frontend/**",
+      "!**/api-specs",
+      "!**/routeTree.gen.ts"
+    ]
+  },
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "asNeeded"
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["frontend/**"],
+      "css": {
+        "parser": {
+          "cssModules": false,
+          "tailwindDirectives": true
+        }
+      },
+      "linter": {
+        "rules": {
+          "style": {
+            "noDescendingSpecificity": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "frontend/src/**",
+        "!frontend/src/**/*.test.ts",
+        "!frontend/src/**/*.test.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"],
+                    "message": "Do not include the file extension in imports."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

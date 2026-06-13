@@ -1,0 +1,9 @@
+set -e
+
+echo "TypeScript checks: backend"
+( cd backend && npx tsc --noEmit --pretty )
+
+echo "TypeScript checks: frontend"
+( cd frontend && npx tsc -b --noEmit --pretty )
+
+echo "All TypeScript checks passed. Proceeding with push."
