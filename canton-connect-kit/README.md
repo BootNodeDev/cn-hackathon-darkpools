@@ -1,8 +1,8 @@
 # canton-connect-kit
 
 wagmi-style React hooks for connecting Canton dApps to CIP-0103 wallets.
-Pairs with `carpincho-wallet`, but works with any wallet that implements
-the canonical CIP-0103 provider surface.
+Pairs with Carpincho, but works with any wallet that implements the
+canonical CIP-0103 provider surface.
 
 ## Why
 
@@ -21,13 +21,13 @@ the scaffold should recognise the patterns from day one.
 
 ## Status
 
-Early — used by `dapp/frontend` in this repo. Not yet a published
+Early — used by the `frontend/` dApp in this repo. Not yet a published
 artifact. The hook signatures are stable enough to depend on; the
 implementation underneath may swap to delegate to `@partylayer/sdk` if that
 ecosystem matures.
 
 For the full local stack that consumes this package, follow the root
-[quick start](../README.md#quick-start).
+[setup guide](../README.md#setup).
 
 ## Hook surface
 
@@ -99,4 +99,4 @@ npm test
 ```
 
 `node:test` with `tsx` as the loader; happy-dom + React Testing Library for
-component tests. Mirrors `carpincho-wallet`'s setup.
+component tests.

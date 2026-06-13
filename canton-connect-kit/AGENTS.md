@@ -8,12 +8,12 @@ This file applies only to `canton-connect-kit/`. For monorepo-wide rules, see [`
 
 ## Working Rules
 
-- Keep this package app-agnostic. Do not import from `dapp/`, `carpincho-wallet/`, or `canton-barebones/`.
+- Keep this package app-agnostic. Do not import from `frontend/` or any other consumer package.
 - Treat `src/index.ts` as the public API. New exports should be deliberate and documented in `README.md`.
 - Keep connectors narrow: `detect`, `connect`, and provider/session wiring only.
 - Keep hooks thin. Hooks should read from `ConnectKitProvider` context and expose lifecycle state; shared state transitions belong in `ConnectKitProvider.tsx`.
 - Keep WalletConnect code lazy-loaded so extension-only dApps do not pay the fallback bundle cost.
-- Use relative imports with explicit `.ts` / `.tsx` extensions, matching the current package style.
+- Use relative imports without file extensions. Biome's `noRestrictedImports` (root `biome.json`) rejects `.ts` / `.tsx` suffixes for this package.
 
 ## Architecture
 

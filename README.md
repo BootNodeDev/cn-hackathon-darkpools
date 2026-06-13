@@ -2,6 +2,8 @@
 
 A dark pool trading venue built on the Canton Network. Traders place private limit orders; the venue pairs crossing orders and settles them atomically at the midpoint price. The privacy comes from Canton's per-party data model -- an order's only stakeholders are the trader and the venue, so nobody else can see the book.
 
+Live at https://darkpools.cc/.
+
 ## Monorepo layout
 
 | Package | What it is | Port |
@@ -30,9 +32,7 @@ npm install
 
 One install links every workspace package. No per-package install step needed.
 
-## Running the frontend (no backend required)
-
-The frontend ships with a mock dark pool client -- a complete in-browser simulation with seeded orders and a live matching engine. No backend or Canton node needed.
+## Running the frontend
 
 ```bash
 npm run app:dev
@@ -40,21 +40,17 @@ npm run app:dev
 
 Opens at http://localhost:3012. Click **Connect Carpincho** and approve in the extension.
 
+The frontend reads its data from the backend at `VITE_DARK_POOL_API` (defaults to `http://localhost:3020`). For UI work without a backend running, it also ships a mock dark pool client -- a complete in-browser simulation with seeded orders and a live matching engine -- so the app is fully clickable on its own.
+
 ## Running the backend
 
-Start in mock mode (no Canton ledger):
-
 ```bash
-npm run backend:up       # Docker -- runs DARK_POOL_MOCK=1
+npm run backend:up       # Docker
 # or, for local dev without Docker:
-npm run backend:dev      # tsx watch, also mock by default
+npm run backend:dev      # tsx watch
 ```
 
-API at http://localhost:3020. See [`backend/README.md`](backend/README.md) for live-ledger configuration.
-
-## Connecting the frontend to the backend
-
-Set `VITE_DARK_POOL_API=http://localhost:3020` in `frontend/.env.local`, then swap `MockDarkPoolClient` for `HttpDarkPoolClient` in `frontend/src/darkpool/DarkPoolProvider.tsx`. The backend README has the full wiring guide.
+API at http://localhost:3020. Both commands default to mock mode (in-memory ledger, no Canton node). See [`backend/README.md`](backend/README.md) for live-ledger configuration.
 
 ## Building the contracts
 

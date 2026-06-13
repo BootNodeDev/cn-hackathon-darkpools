@@ -34,11 +34,10 @@ The Carpincho icon should appear in your browser toolbar.
 
 After loading the extension, open Carpincho and go to **Settings** to configure:
 
-- **Network** -- set to `canton:localnet` for local development (Canton Node endpoint).
-- **Wallet companion URL** -- the wallet-service URL if using the full local stack.
-- **WalletConnect Project ID** -- only required for WalletConnect fallback (optional).
+- **Network** -- set to `canton:localnet` for local development, or point it at the Canton node you connect to.
+- **WalletConnect Project ID** -- only required for the WalletConnect fallback (optional).
 
-For full local stack setup (validator, wallet-service, Canton node), see the root [`README.md`](../README.md).
+The defaults are sensible for the dark pools dApp; the connection settings persist in the extension.
 
 ## Rebuilding
 

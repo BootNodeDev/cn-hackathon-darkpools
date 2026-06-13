@@ -46,8 +46,9 @@ Subproject docs must not restate root rules -- only local deltas and upward link
 | Package manager | npm workspaces | Root `package-lock.json`; one root `npm install` links every workspace |
 | Node | 24 | Pinned via root `.nvmrc` |
 | Lint / format | Biome | One root `biome.json`; per-project rules under `overrides`. No per-package Biome install |
-| Pre-commit | lint-staged | Root `.lintstagedrc.mjs` runs `biome check --write` |
-| Pre-push | commitlint | Root `.husky/` |
+| Commit-msg hook | commitlint | Root `.husky/commit-msg` runs `commitlint --edit` |
+| Pre-commit hook | lint-staged | Root `.husky/pre-commit` runs `lint-staged` (`biome check --write` over the three Node packages) |
+| Pre-push hook | tsc | Root `.husky/pre-push` runs `tsc --noEmit` in `backend`, `frontend`, and `canton-connect-kit` |
 | Container runtime | Docker | Used by `backend/` |
 
 ## Subprojects
@@ -87,8 +88,8 @@ See [`architecture.md`](architecture.md) for system shape, data flow, and port a
 Each subproject owns its test runner:
 
 - `frontend`: `npm --prefix frontend test` (Node `node:test` + `--experimental-strip-types`)
-- `backend`: `npm --prefix backend test` (Node `node:test`, 33 tests including mock integration)
-- `contracts`: `npm --prefix contracts test` (Daml Script via dpm)
+- `backend`: `npm --prefix backend test` (Node `node:test`; includes a mock place→match→settle integration)
+- `contracts`: `npm --prefix contracts test` (Daml Script via dpm; needs its own `npm install` first)
 - `canton-connect-kit`: `npm --prefix canton-connect-kit test` (Node `node:test` + `tsx`)
 
 Root alias: `npm run backend:test`.

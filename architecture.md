@@ -26,7 +26,7 @@ flowchart TD
   wallet -->|"external-party actions"| ledger
 ```
 
-In the current default configuration, the frontend runs against a `MockDarkPoolClient` (no backend needed) and the backend runs in `DARK_POOL_MOCK=1` mode (no ledger needed). The live path wires all four components together.
+The frontend reads from the backend and renders; the backend serves the trader/venue API and settles matches on the Canton ledger. For development without a Canton node, the frontend can run against its in-browser mock client and the backend against an in-memory ledger (`DARK_POOL_MOCK=1`).
 
 ## Data Flow
 
@@ -65,10 +65,9 @@ The matcher runs on a heartbeat (default 5 min) plus `POST /venue/match`. Each p
 | `CANTON_BACKEND_TOKEN` | `backend` env | Static bearer token for the Canton participant |
 | `FIVENORTH_CLIENT_SECRET` | `backend` env | M2M OAuth secret (takes precedence over static token) |
 | `DARK_POOL_BOOTSTRAP` | `backend` env | Path to `dark-pool.bootstrap.json` (parties, pool, factory, instruments) |
-| `VITE_DARK_POOL_API` | `frontend` env | Backend base URL (e.g., `http://localhost:3020`) |
-| `VITE_WC_PROJECT_ID` | `frontend` env | WalletConnect project ID (optional) |
+| `VITE_DARK_POOL_API` | `frontend` env | Backend base URL (defaults to `http://localhost:3020`) |
 
-Auth precedence in the backend: `DARK_POOL_MOCK=1` → mock; `CANTON_BACKEND_TOKEN` → static JWT; `FIVENORTH_CLIENT_SECRET` → M2M token exchange.
+Auth precedence in the backend: `DARK_POOL_MOCK=1` → mock; `CANTON_BACKEND_TOKEN` → static JWT; `FIVENORTH_CLIENT_SECRET` → M2M token exchange. The backend also reads `DARK_POOL_SERVICE_PORT`, `MATCH_INTERVAL_MS`, `CORS_ORIGINS`, and the `FIVENORTH_*` M2M knobs; see [`backend/AGENTS.md`](backend/AGENTS.md). The frontend needs no environment variables to run -- network and wallet-companion URL are set in-app and persisted to `localStorage`.
 
 ## Contracts Package Layout
 

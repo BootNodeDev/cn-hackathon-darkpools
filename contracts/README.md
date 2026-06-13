@@ -107,4 +107,4 @@ The npm scripts are the canonical build and test entry points (they wrap `dpm`).
 
 ## License
 
-MIT. See `LICENSE`.
+MIT (declared in `package.json`).
