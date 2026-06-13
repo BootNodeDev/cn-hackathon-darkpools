@@ -1,0 +1,19 @@
+{
+  "name": "cn-dark-pool-contracts",
+  "version": "0.0.1",
+  "description": "A dark pool trading venue for Canton Network tokens, built on the token-standard allocation interfaces",
+  "license": "MIT",
+  "author": "BootNode",
+  "scripts": {
+    "setup": "bash scripts/build-harness.sh",
+    "postinstall": "npm run setup",
+    "clean": "rm -rf daml/dark-pool/.daml daml/dark-pool-test/.daml daml/registry-token/.daml daml/registry-token-test/.daml",
+    "build": "cd daml/dark-pool && LANG=C.UTF-8 dpm build && cd ../registry-token && LANG=C.UTF-8 dpm build && cd ../dark-pool-test && LANG=C.UTF-8 dpm build && cd ../registry-token-test && LANG=C.UTF-8 dpm build",
+    "build:dark-pool": "cd daml/dark-pool && LANG=C.UTF-8 dpm build",
+    "build:registry-token": "cd daml/registry-token && LANG=C.UTF-8 dpm build",
+    "test": "npm run test:dark-pool && npm run test:registry-token",
+    "test:dark-pool": "npm run build:dark-pool && cd daml/dark-pool-test && LANG=C.UTF-8 dpm test",
+    "test:registry-token": "npm run build:registry-token && cd daml/registry-token-test && LANG=C.UTF-8 dpm test",
+    "test:coverage": "npm run build:dark-pool && cd daml/dark-pool-test && LANG=C.UTF-8 dpm test --all --show-coverage --coverage-ignore-choice '^splice' --coverage-ignore-choice ':Archive$'"
+  }
+}

@@ -1,0 +1,921 @@
+-- Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module Splice.Scripts.TestDecentralizedAutomation where
+
+import DA.Action (replicateA_)
+import DA.Assert
+import DA.Foldable (forA_)
+import DA.List()
+import qualified DA.Map as Map
+import DA.Set()
+import Daml.Script
+import DA.Time
+
+import Splice.Round()
+import Splice.Types
+import Splice.Amulet
+import Splice.AmuletRules
+import Splice.ExternalPartyAmuletRules
+import Splice.ExternalPartyConfigState
+import Splice.Fees
+
+import Splice.DsoRules
+import Splice.Util
+
+import Splice.Scripts.Util
+import Splice.Scripts.DsoTestUtils
+import Splice.Ans
+import Splice.Scripts.AnsRulesParameters
+import Splice.Scripts.TestTransferPreapproval
+import Splice.Testing.Registries.AmuletRegistry.Parameters
+import Splice.Testing.Registries.AmuletRegistry qualified as Registry
+import Splice.Wallet.Subscriptions
+import Splice.Testing.Registries.AmuletRegistry qualified as AmuletRegistry
+import Splice.Testing.TokenStandard.RegistryApi qualified as RegistryApi
+import Splice.Api.Token.HoldingV1 (InstrumentId(..))
+import Splice.Api.Token.TransferInstructionV1 qualified as TransferInstructionV1
+import Splice.Api.Token.MetadataV1
+import Splice.Testing.Utils
+import Splice.AmuletTransferInstruction
+import Splice.Api.Token.TransferInstructionV1(TransferInstruction)
+import DA.Optional (fromSomeNote)
+import Splice.Api.Token.AllocationV1 qualified as AllocationV1
+import Splice.AmuletAllocation
+import Splice.Api.Token.AllocationInstructionV1 qualified as AllocationInstructionV1
+
+
+
+testUnclaimedRewardsMerging : Script ()
+testUnclaimedRewardsMerging = do
+  (app, _, (sv1, _, _, _)) <- initDevNet
+
+  -- onboard a validator
+  validator1 <- setupValidator app "validator1"
+  provider1 <- setupUser app "provider1" validator1
+
+  forA_ [1..6] do \_ -> generateUnclaimedReward app provider1
+
+  [(amuletRulesCid, _)] <- query @AmuletRules app.dso
+  unclaimedRewards <- query @UnclaimedReward app.dso
+  dsoDelegateSubmits app $ \cid -> exerciseCmd cid $
+    DsoRules_MergeUnclaimedRewards with
+      amuletRulesCid
+      unclaimedRewardCids = (fmap fst unclaimedRewards)
+      sv = Some sv1
+
+  unclaimedRewards <- query @UnclaimedReward app.dso
+  length unclaimedRewards === 1
+
+  pure ()
+
+
+-- Development Fund
+--------------------
+
+testUnclaimedDevelopmentFundCouponsMerging : Script ()
+testUnclaimedDevelopmentFundCouponsMerging = do
+  let
+    -- 5% Development Fund
+    amuletConfig =
+      defaultAmuletConfig with
+        issuanceCurve = defaultAmuletConfig.issuanceCurve with
+          initialValue = defaultAmuletConfig.issuanceCurve.initialValue with
+            optDevelopmentFundPercentage = Some 0.05
+  (app, _, (sv1, _, _, _)) <- initDevNetWithAmuletConfig amuletConfig
+
+  -- Mint 5 unclaimed development fund coupons
+  replicateA_ 5 $ runNextIssuanceD app 1.0 None
+
+  [(amuletRulesCid, _)] <- query @AmuletRules app.dso
+  unclaimedDevelopmentFundCouponCids@(cid1 :: _) <- fmap fst <$> query @UnclaimedDevelopmentFundCoupon app.dso
+  length unclaimedDevelopmentFundCouponCids === 5
+
+  -- Unhappy path - requires more than one development fund coupon contract.
+  dsoDelegateSubmitsMustFail app $ \cid -> exerciseCmd cid $
+    DsoRules_MergeUnclaimedDevelopmentFundCoupons with
+      amuletRulesCid
+      choiceArg = AmuletRules_MergeUnclaimedDevelopmentFundCoupons with
+        unclaimedDevelopmentFundCouponCids = [cid1]
+      sv = sv1
+
+  -- Happy path
+  dsoDelegateSubmits app $ \cid -> exerciseCmd cid $
+    DsoRules_MergeUnclaimedDevelopmentFundCoupons with
+      amuletRulesCid
+      choiceArg = AmuletRules_MergeUnclaimedDevelopmentFundCoupons with
+        unclaimedDevelopmentFundCouponCids
+      sv = sv1
+
+  unclaimedDevelopmentFundCoupons <- query @UnclaimedDevelopmentFundCoupon app.dso
+  length unclaimedDevelopmentFundCoupons === 1
+
+  pure ()
+
+testDevelopmentFundCouponExpiry : Script ()
+testDevelopmentFundCouponExpiry = do
+  fundManager <- allocateParty "FundManager"
+  let
+    -- 5% Development Fund
+    amuletConfig =
+      defaultAmuletConfig with
+        optDevelopmentFundManager = Some fundManager
+        issuanceCurve = defaultAmuletConfig.issuanceCurve with
+          initialValue = defaultAmuletConfig.issuanceCurve.initialValue with
+            optDevelopmentFundPercentage = Some 0.05
+  (app, _, (sv1, _, _, _)) <- initDevNetWithAmuletConfig amuletConfig
+  [(dsoRulesCid, _)] <- query @DsoRules app.dso
+
+  -- Mint 1 unclaimed development fund coupon
+  runNextIssuanceD app 1.0 None
+  [(unclaimedDevelopmentFundCouponCid, unclaimedDevelopmentFundCoupon)] <- query @UnclaimedDevelopmentFundCoupon app.dso
+
+  -- Allocate a development fund coupon
+  now <- getTime
+  let
+    expiresAt = addRelTime now (hours 1)
+    amount = unclaimedDevelopmentFundCoupon.amount
+    reason = "Alice fixed issue XXX"
+  alice <- setupUser app "alice" app.dso
+  developmentFundCouponCid <- (.developmentFundCouponCid) <$>
+    allocateDevelopmentFundCoupon app fundManager alice.primaryParty amount expiresAt reason [unclaimedDevelopmentFundCouponCid]
+
+  -- Unhappy - expiresAt has not been reached
+  submitMustFail (actAs sv1 <> readAs app.dso) do
+    exerciseCmd dsoRulesCid DsoRules_ExpireDevelopmentFundCoupon with
+      developmentFundCouponCid
+      sv = sv1
+
+  -- Happy
+  setTime $ addRelTime expiresAt (minutes 1)
+  unclaimedDevelopmentFundCouponCid <- (.unclaimedDevelopmentFundCouponCid) . (.result) <$>
+    submit (actAs sv1 <> readAs app.dso) do
+      exerciseCmd dsoRulesCid DsoRules_ExpireDevelopmentFundCoupon with
+        developmentFundCouponCid
+        sv = sv1
+  Some unclaimedDevelopmentFundCoupon <- queryContractId app.dso unclaimedDevelopmentFundCouponCid
+  unclaimedDevelopmentFundCoupon === UnclaimedDevelopmentFundCoupon with
+    dso = app.dso
+    amount
+
+  pure ()
+
+
+-- Testing confirmations
+------------------------
+
+testRequiredNumOfConfirmation : Script ()
+testRequiredNumOfConfirmation = do
+  (_, dso, (sv1, sv2, sv3, _)) <- initDevNet
+
+  [(amuletRulesCid, _)] <- query @AmuletRules dso
+  [(dsoRulesCid, dsoRules)] <- query @DsoRules dso
+
+  Map.size dsoRules.svs === 4
+
+  svX <- allocateParty "svX"
+
+  -- create 3 confirmations
+  let action = ARC_DsoRules with
+        dsoAction = SRARC_AddSv $ DsoRules_AddSv with
+          newSvParty = svX
+          newSvName = "svX"
+          newSvRewardWeight = 1
+          newSvParticipantId = "svX-participant-id"
+          joinedAsOfRound = (Round 3)
+
+  confirmationCids <- forA [sv1, sv2, sv3] $ \svParty -> do
+    result <- submit (actAs svParty <> readAs dso) $ exerciseCmd dsoRulesCid DsoRules_ConfirmAction with
+      confirmer = svParty
+      action
+    return result.confirmation
+
+  confirmations <- query @Confirmation dso
+  length confirmations === 3
+
+  -- test that expiry is checked
+  passTime (minutes 5)
+  submitMustFail (actAs sv1 <> readAs dso) $ exerciseCmd dsoRulesCid
+    DsoRules_ExecuteConfirmedAction with
+      action
+      amuletRulesCid = Some amuletRulesCid
+      confirmationCids
+      sv = Some sv1
+  passTime (negate (minutes 5))
+
+  -- There are 4 SVs in total, which implies f = 1 and thus 3 confirmations are required.
+  submit (actAs sv1 <> readAs dso) $ exerciseCmd dsoRulesCid
+    DsoRules_ExecuteConfirmedAction with
+      action
+      amuletRulesCid = Some amuletRulesCid
+      confirmationCids
+      sv = Some sv1
+
+  -- check that the `action` was executed
+  [(_, dsoRules)] <- query @DsoRules dso
+  require "svX is a sv" (svX `Map.member` dsoRules.svs)
+
+  pure ()
+
+testConfirmationExpiry : Script ()
+testConfirmationExpiry = do
+  (app, dso, (sv1, _, _, _)) <- initMainNet
+
+  -- a new sv prepares his participant
+  svX <- allocateParty "svX"
+
+  [(dsoRulesCid, _)] <- query @DsoRules dso
+
+  -- create a single confirmation which will not suffice to initiate an action
+  confirmationResult <- submit (actAs sv1 <> readAs dso) $ exerciseCmd dsoRulesCid DsoRules_ConfirmAction with
+    confirmer = sv1
+    action = ARC_DsoRules with
+      dsoAction = SRARC_AddSv $ DsoRules_AddSv with
+        newSvParty = svX
+        newSvName = "svX"
+        newSvRewardWeight = 1
+        newSvParticipantId = "svX-participant-id"
+        joinedAsOfRound = (Round 3)
+
+  -- DSO delegate tries to expire the confirmation, but it's too early
+  dsoDelegateSubmitsMustFail app $ \cid -> exerciseCmd cid $
+    DsoRules_ExpireStaleConfirmation confirmationResult.confirmation (Some sv1)
+
+  -- wait for the confirmation TTL to pass
+  passTime (minutes 5)
+
+  -- DSO delegate expires the confirmation
+  dsoDelegateSubmits app $ \cid -> exerciseCmd cid $
+    DsoRules_ExpireStaleConfirmation confirmationResult.confirmation (Some sv1)
+
+  pure ()
+
+
+-- Testing ANS decentralization
+-------------------------------
+
+testDecentralizedAns : Script ()
+testDecentralizedAns = do
+  (app, dso, (sv1, sv2, sv3, sv4)) <- initDevNet
+
+  alice <- setupUser app "alice" app.dso
+
+  [(dsoRulesCid, _)] <- query @DsoRules dso
+  [(ansRulesCid, _)] <- query @AnsRules dso
+
+  ansSummary <- submit (actAs alice.primaryParty <> readAs app.dso) $ exerciseCmd ansRulesCid AnsRules_RequestEntry with
+    name = "ans.darth.vader"
+    url = "https://darth-vader-ans.com"
+    description = "Darth Vader's ANS Description"
+    user = alice.primaryParty
+
+  amulet <- tap app alice 1.5
+
+  paymentContext <- getPaymentTransferContext app alice
+  result <- submit (actAs alice.primaryParty <> actAs app.dso) $ exerciseCmd ansSummary.requestCid SubscriptionRequest_AcceptAndMakePayment with
+    inputs = [InputAmulet amulet]
+    context = paymentContext
+    walletProvider = app.dso
+  let initialPaymentCid = result.subscriptionPayment
+
+  -- SVs create confirmations for collecting the initial payment of the requested ans entry.
+  appContext <- getAppTransferContext app app.dsoUser
+  let collectInitialPaymentAction = ARC_AnsEntryContext with
+        ansEntryContextCid = ansSummary.entryCid
+        ansEntryContextAction = ANSRARC_CollectInitialEntryPayment $ AnsEntryContext_CollectInitialEntryPayment with
+          paymentCid = initialPaymentCid
+          transferContext = appContext
+          ansRulesCid
+
+  confirmationCids <- forA [sv1, sv2, sv3, sv4] $ \svParty -> do
+    result <- submit (actAs svParty <> readAs dso) $ exerciseCmd dsoRulesCid DsoRules_ConfirmAction with
+      confirmer = svParty
+      action = collectInitialPaymentAction
+    return result.confirmation
+
+  confirmations <- query @Confirmation dso
+  length confirmations === 4
+
+  submit (actAs sv1 <> readAs dso) $ exerciseCmd dsoRulesCid
+    DsoRules_ExecuteConfirmedAction with
+      action = collectInitialPaymentAction
+      amuletRulesCid = None
+      confirmationCids
+      sv = Some sv1
+
+  [(entryCid, entry)] <- queryFilter @AnsEntry app.dso (\entry -> entry.user == alice.primaryParty && entry.name == "ans.darth.vader")
+  [(subscriptionStateCid, subscriptionState)] <- queryFilter @SubscriptionIdleState app.dso (\state -> state.subscriptionData.sender == alice.primaryParty)
+
+  subscriptionState.nextPaymentDueAt === entry.expiresAt
+
+  passTime (days 60)
+  runNextIssuance app
+  passTimeToRoundOpen app
+  paymentContext <- getPaymentTransferContext app alice
+  appContext <- getAppTransferContext app app.dsoUser
+
+  amulet <- tap app alice 1.5
+  result <- submit (actAs alice.primaryParty <> actAs app.dso) $ exerciseCmd subscriptionStateCid SubscriptionIdleState_MakePayment with
+    inputs = [InputAmulet amulet]
+    context = paymentContext
+    walletProvider = app.dso
+  let paymentCid = result.subscriptionPayment
+
+  submit (actAs sv1 <> readAs dso) $ exerciseCmd dsoRulesCid
+    DsoRules_CollectEntryRenewalPayment with
+      ansEntryContextCid = ansSummary.entryCid
+      choiceArg = AnsEntryContext_CollectEntryRenewalPayment with
+        paymentCid
+        entryCid
+        transferContext = appContext
+        ansRulesCid
+      sv = Some sv1
+
+  [(_, renewedEntry)] <- queryFilter @AnsEntry app.dso (\entry -> entry.user == alice.primaryParty && entry.name == "ans.darth.vader")
+  [(_, renewedSubscriptionState)] <- queryFilter @SubscriptionIdleState app.dso (\state -> state.subscriptionData.sender == alice.primaryParty)
+
+  renewedEntry.expiresAt === addRelTime entry.expiresAt defaultAnsRulesConfig.entryLifetime
+  renewedSubscriptionState.nextPaymentDueAt === renewedEntry.expiresAt
+
+  -- SVs confirm to reject invalid entry payment of ANS request.
+
+  rejectedSummary <- submit (actAs alice.primaryParty <> readAs app.dso) $ exerciseCmd ansRulesCid AnsRules_RequestEntry with
+    name = "reject.darth.vader"
+    url = "invalid url which will be rejected by SVs by creating confirmations."
+    description = "ANS Description"
+    user = alice.primaryParty
+
+  amulet <- tap app alice 1.5
+
+  paymentContext <- getPaymentTransferContext app alice
+  result <- submit (actAs alice.primaryParty <> actAs app.dso) $ exerciseCmd rejectedSummary.requestCid SubscriptionRequest_AcceptAndMakePayment with
+    inputs = [InputAmulet amulet]
+    context = paymentContext
+    walletProvider = app.dso
+  let initialPaymentCid = result.subscriptionPayment
+
+  -- SVs create confirmations for rejecting initial payment of the requested ans entry.
+  appContext <- getAppTransferContext app app.dsoUser
+  let rejectInitialPaymentAction = ARC_AnsEntryContext with
+        ansEntryContextCid = rejectedSummary.entryCid
+        ansEntryContextAction = ANSRARC_RejectEntryInitialPayment $ AnsEntryContext_RejectEntryInitialPayment with
+          paymentCid = initialPaymentCid
+          transferContext = appContext
+          ansRulesCid
+
+  confirmationCids <- forA [sv1, sv2, sv3, sv4] $ \svParty -> do
+    result <- submit (actAs svParty <> readAs dso) $ exerciseCmd dsoRulesCid DsoRules_ConfirmAction with
+      confirmer = svParty
+      action = rejectInitialPaymentAction
+    return result.confirmation
+
+  confirmations <- query @Confirmation dso
+  length confirmations === 4
+
+  submit (actAs sv1 <> readAs dso) $ exerciseCmd dsoRulesCid
+    DsoRules_ExecuteConfirmedAction with
+      action = rejectInitialPaymentAction
+      amuletRulesCid = None
+      confirmationCids
+      sv = Some sv1
+
+  -- entry is not created
+  [] <- queryFilter @AnsEntry app.dso (\entry -> entry.user == alice.primaryParty && entry.name == "reject.darth.vader")
+  -- initial paynment is archived
+  None <- queryContractId @SubscriptionInitialPayment app.dso initialPaymentCid
+
+  pure ()
+
+
+terminatedSubscriptionCanBeCleanedUp : Script ()
+terminatedSubscriptionCanBeCleanedUp = script do
+  (app, dso, (sv1, _, _, _)) <- initDevNet
+
+  alice <- setupUser app "alice" app.dso
+
+  [(dsoRulesCid, _)] <- query @DsoRules dso
+  [(ansRulesCid, _)] <- query @AnsRules dso
+
+  ansSummary <- submit (actAs alice.primaryParty <> readAs app.dso) $ exerciseCmd ansRulesCid AnsRules_RequestEntry with
+    name = "ans.darth.vader"
+    url = "https://darth-vader-ans.com"
+    description = "Darth Vader's ANS Description"
+    user = alice.primaryParty
+
+  result <- submit alice.primaryParty $ exerciseCmd ansSummary.requestCid SubscriptionRequest_Reject
+
+  submit (actAs sv1 <> readAs dso) $ exerciseCmd dsoRulesCid (DsoRules_TerminateSubscription ansSummary.entryCid result.terminatedSubscription (Some sv1))
+
+  entryContexts <- query @AnsEntryContext app.dso
+  entryContexts === []
+
+  terminatedSubscriptions <- query @TerminatedSubscription app.dso
+  terminatedSubscriptions === []
+  pure ()
+
+testCreateExternalPartyAmuletRules : Script ()
+testCreateExternalPartyAmuletRules = script do
+  (app, dso, (sv1, sv2, sv3, _)) <- initDevNet
+  [(dsoRulesCid, _)] <- query @DsoRules dso
+  (externalPartyAmuletRulesCid, _) <- getExternalPartyAmuletRules app
+  submit dso $ exerciseCmd externalPartyAmuletRulesCid Archive
+  None <- queryContractId app.dso externalPartyAmuletRulesCid
+
+  let action = ARC_DsoRules with
+        dsoAction = SRARC_CreateExternalPartyAmuletRules DsoRules_CreateExternalPartyAmuletRules
+
+  confirmationCids <- forA [sv1, sv2, sv3] $ \svParty -> do
+    result <- submit (actAs svParty <> readAs dso) $ exerciseCmd dsoRulesCid DsoRules_ConfirmAction with
+      confirmer = svParty
+      action
+    return result.confirmation
+
+  submit (actAs sv1 <> readAs dso) $ exerciseCmd dsoRulesCid
+    DsoRules_ExecuteConfirmedAction with
+      action
+      amuletRulesCid = None
+      confirmationCids
+      sv = Some sv1
+
+  _ <- getExternalPartyAmuletRules app
+
+  pure ()
+
+testTransferPreapprovalSend : Script ()
+testTransferPreapprovalSend = do
+  (app, dso, (sv1, sv2, sv3, _)) <- initDevNet
+  validator <- setupValidator app "validator"
+  alice <- setupUser app "alice" validator
+  externalParty <- allocateParty "externalParty"
+  (externalPartyAmuletRulesCid, _) <- getExternalPartyAmuletRules app
+  now <- getTime
+  [(dsoRulesCid, _)] <- query @DsoRules dso
+
+  transferPreapprovalCid <- createTransferPreapproval externalParty validator dso  (now `addRelTime` hours 24)
+
+  ExternalPartyAmuletRules_CreateTransferCommandResult transferCmd <- submit (actAs alice.primaryParty <> readAs app.dso) $ exerciseCmd externalPartyAmuletRulesCid ExternalPartyAmuletRules_CreateTransferCommand
+    with
+      sender = alice.primaryParty
+      receiver = externalParty
+      amount = 42.0
+      expiresAt = now `addRelTime` hours 12
+      nonce = 0
+      delegate = validator
+      description = Some "test-transfer-command"
+      expectedDso = Some app.dso
+
+  let action = ARC_DsoRules with
+        dsoAction = SRARC_CreateTransferCommandCounter (DsoRules_CreateTransferCommandCounter alice.primaryParty)
+
+  confirmationCids <- forA [sv1, sv2, sv3] $ \svParty -> do
+    result <- submit (actAs svParty <> readAs dso) $ exerciseCmd dsoRulesCid DsoRules_ConfirmAction with
+      confirmer = svParty
+      action
+    return result.confirmation
+
+  submit (actAs sv1 <> readAs dso) $ exerciseCmd dsoRulesCid
+    DsoRules_ExecuteConfirmedAction with
+      action
+      amuletRulesCid = None
+      confirmationCids
+      sv = Some sv1
+
+  [(transferCounterCid, _)] <- query @TransferCommandCounter app.dso
+
+  context <- getPaymentTransferContext app alice
+
+  amulet <- tap app alice 50.0
+
+  [] <- query @Amulet externalParty
+
+  TransferCommand_SendResult (TransferCommandResultSuccess _) _ _ <- submit (actAs validator <> readAs app.dso) $ exerciseCmd transferCmd TransferCommand_Send with
+    context
+    transferPreapprovalCidO = Some transferPreapprovalCid
+    inputs = [InputAmulet amulet]
+    transferCounterCid
+
+  amulets <- query @Amulet externalParty
+  map snd amulets === [Amulet app.dso externalParty (ExpiringAmount 42.0 (Round 1) (RatePerRound 0.00002))]
+
+  pure ()
+
+testTransferPreapprovalExpiry: Script ()
+testTransferPreapprovalExpiry = do
+  (app, dso, (sv1, _, _, _)) <- initDevNet
+  validator <- setupValidator app "validator"
+  externalParty <- allocateParty "externalParty"
+  now <- getTime
+  [(dsoRulesCid, _)] <- query @DsoRules dso
+
+  transferPreapprovalCid <- createTransferPreapproval externalParty validator dso  (now `addRelTime` days 1)
+
+  -- Fails before expiry
+  submitMustFail (actAs sv1 <> readAs app.dso) $ exerciseCmd dsoRulesCid DsoRules_ExpireTransferPreapproval with
+    transferPreapprovalCid
+    sv = Some sv1
+  -- Expire the TransferPreapproval
+  passTime (days 1)
+  -- Succeeds after expiry
+  submit (actAs sv1 <> readAs app.dso) $ exerciseCmd dsoRulesCid DsoRules_ExpireTransferPreapproval with
+    transferPreapprovalCid
+    sv = Some sv1
+
+  pure ()
+
+
+testBootstrapExternalPartyConfigState : Script ()
+testBootstrapExternalPartyConfigState = do
+  (_, dso, (sv1, sv2, sv3, _)) <- initDevNet
+  -- archive to simulate bootstrapping with an older version
+  configStates <- query @ExternalPartyConfigState dso
+  submit dso $ forA configStates $ \(cid, _) -> archiveCmd cid
+  [] <- query @ExternalPartyConfigState dso
+
+  [(dsoRulesCid, _)] <- query @DsoRules dso
+  [(amuletRulesCid, _)] <- query @AmuletRules dso
+
+  let action = ARC_DsoRules (SRARC_CreateBootstrapExternalPartyConfigStateInstruction DsoRules_CreateBootstrapExternalPartyConfigStateInstruction)
+
+  confirmationCids <- forA [sv1, sv2, sv3] $ \svParty -> do
+    result <- submit (actAs svParty <> readAs dso) $ exerciseCmd dsoRulesCid DsoRules_ConfirmAction with
+      confirmer = svParty
+      action
+    return result.confirmation
+
+  submit (actAs sv1 <> readAs dso) $ exerciseCmd dsoRulesCid DsoRules_ExecuteConfirmedAction with
+    action
+    amuletRulesCid = None
+    confirmationCids
+    sv = Some sv1
+
+  [(instructionCid, _)] <- query @BootstrapExternalPartyConfigStateInstruction dso
+  [(round0Cid, _), (round1Cid, _), (round2Cid, _)] <- Registry.getActiveOpenRoundsSorted dso
+  submit (actAs sv1 <> readAs dso) $ exerciseCmd dsoRulesCid DsoRules_BootstrapExternalPartyConfigState with
+    amuletRulesCid
+    instructionCid
+    openMiningRoundTriple = OpenMiningRoundTriple with
+      round0Cid
+      round1Cid
+      round2Cid
+    sv = sv1
+
+  configStates <- query @ExternalPartyConfigState dso
+  length configStates === 2
+  pure ()
+
+
+testExpireAmuletTransferInstruction : Script ()
+testExpireAmuletTransferInstruction = do
+  (app, _, (sv1, _, _, _)) <- initDevNet
+  sender <- setupUser app "sender" app.dso
+  _  <- tap app sender 100.0
+  let registry = AmuletRegistry.AmuletRegistry
+        with
+          dso = app.dso
+          instrumentId = InstrumentId
+            with
+              admin = app.dso
+              id = "Amulet"
+  liquidAmulets <- query @Amulet sender.primaryParty
+  let totalBalance = sum (map (\(_, a) -> a.amount.initialAmount) liquidAmulets)
+  let senderAmuletCids = map fst liquidAmulets            
+  receiver <- allocateParty "receiver"
+  now <- getTime
+  transfer <- RegistryApi.getTransferFactory registry TransferInstructionV1.TransferFactory_Transfer
+    with
+      expectedAdmin = app.dso
+      transfer = TransferInstructionV1.Transfer with
+        sender = sender.primaryParty
+        receiver
+        amount = totalBalance
+        instrumentId = registry.instrumentId
+        requestedAt = now
+        executeBefore = now `addRelTime` hours 1
+        inputHoldingCids = map toInterfaceContractId senderAmuletCids
+        meta = emptyMetadata
+      extraArgs = ExtraArgs with
+        context = emptyChoiceContext
+        meta = emptyMetadata
+
+  submitWithDisclosures' sender.primaryParty transfer.disclosures $ exerciseCmd transfer.factoryCid transfer.arg
+
+  lockedAmuletsBeforeExpire <- query @LockedAmulet sender.primaryParty
+  length lockedAmuletsBeforeExpire === 1          
+
+  liquidAmuletsBeforeExpire <- query @Amulet sender.primaryParty
+  assertMsg "Sender liquid wallet should be truly empty" (null liquidAmuletsBeforeExpire)
+
+  [(dsoRulesCid, _)] <- query @DsoRules app.dso
+  [(amuletRulesCid, _)] <- query @AmuletRules app.dso
+
+  [(instrInterfaceCid, maybeView)] <- queryInterface @TransferInstruction app.dso
+  let instrView = fromSomeNote "Need view" maybeView
+
+  let stakeholders = [instrView.transfer.sender, instrView.transfer.receiver]
+
+  let expireBatchChoice = AmuletRules_Amulet_ExpireTransferInstructions with
+        expectedDso = app.dso
+        inputs = [AmuletRules_ExpireTransferInstructionInput with 
+                    transferInstructionCid = instrInterfaceCid
+                    expireLock = True]
+        observers = stakeholders
+
+  submitMustFail (actAs sv1 <> readAs app.dso) $ 
+    exerciseCmd dsoRulesCid DsoRules_Amulet_ExpireTransferInstructions with
+      amuletRulesCid = amuletRulesCid
+      transferInsts = expireBatchChoice 
+      sv = sv1    
+
+  passTime (hours 2)
+
+  submit (actAs sv1 <> readAs app.dso) $ 
+    exerciseCmd dsoRulesCid DsoRules_Amulet_ExpireTransferInstructions with
+      amuletRulesCid = amuletRulesCid
+      transferInsts = expireBatchChoice 
+      sv = sv1
+
+  lockedAmuletsAfterExpire <- query @LockedAmulet sender.primaryParty
+  length lockedAmuletsAfterExpire === 0  
+
+  instructions <- query @AmuletTransferInstruction app.dso
+  instructions === []
+
+  senderAmulets <- query @Amulet sender.primaryParty
+  assertMsg "Sender should have their amulets back" (not $ null senderAmulets) 
+
+  let totalBalanceAfter = sum (map (\(_, a) -> a.amount.initialAmount) senderAmulets)
+
+  assertMsg ("Balance should be recovered, but got: " <> show totalBalanceAfter)
+            (totalBalanceAfter == totalBalance)
+
+  pure ()
+
+testExpireTransferInstructionAlreadyUnlocked : Script ()
+testExpireTransferInstructionAlreadyUnlocked = do
+  (app, _, (sv1, _, _, _)) <- initDevNet
+  sender <- setupUser app "sender" app.dso
+  _  <- tap app sender 100.0
+  let registry = AmuletRegistry.AmuletRegistry
+        with
+          dso = app.dso
+          instrumentId = InstrumentId
+            with
+              admin = app.dso
+              id = "Amulet"
+
+  liquidAmulets <- query @Amulet sender.primaryParty
+  let totalBalance = sum (map (\(_, a) -> a.amount.initialAmount) liquidAmulets)
+  let senderAmuletCids = map fst liquidAmulets            
+  
+  receiver <- allocateParty "receiver"
+  now <- getTime
+  
+  transfer <- RegistryApi.getTransferFactory registry TransferInstructionV1.TransferFactory_Transfer
+    with
+      expectedAdmin = app.dso
+      transfer = TransferInstructionV1.Transfer with
+        sender = sender.primaryParty
+        receiver
+        amount = totalBalance
+        instrumentId = registry.instrumentId
+        requestedAt = now
+        executeBefore = now `addRelTime` hours 1
+        inputHoldingCids = map toInterfaceContractId senderAmuletCids
+        meta = emptyMetadata
+      extraArgs = ExtraArgs with
+        context = emptyChoiceContext
+        meta = emptyMetadata
+
+  submitWithDisclosures' sender.primaryParty transfer.disclosures $ exerciseCmd transfer.factoryCid transfer.arg
+
+  passTime (hours 2)
+
+  [(lockedAmuletCid, _)] <- query @LockedAmulet sender.primaryParty
+  
+  submit sender.primaryParty $ exerciseCmd lockedAmuletCid LockedAmulet_OwnerExpireLockV2
+
+  lockedAmuletsAfterOwnerExpire <- query @LockedAmulet sender.primaryParty
+  lockedAmuletsAfterOwnerExpire === []  
+
+  [(dsoRulesCid, _)] <- query @DsoRules app.dso
+  [(amuletRulesCid, _)] <- query @AmuletRules app.dso
+  [(instrInterfaceCid, maybeView)] <- queryInterface @TransferInstruction app.dso
+  let instrView = fromSomeNote "Need view" maybeView
+  let stakeholders = [instrView.transfer.sender, instrView.transfer.receiver]
+
+  let expireBatchChoiceTrue = AmuletRules_Amulet_ExpireTransferInstructions with
+        expectedDso = app.dso
+        inputs = [AmuletRules_ExpireTransferInstructionInput with 
+                    transferInstructionCid = instrInterfaceCid
+                    expireLock = True]
+        observers = stakeholders
+
+  submitMustFail (actAs sv1 <> readAs app.dso) $ 
+    exerciseCmd dsoRulesCid DsoRules_Amulet_ExpireTransferInstructions with
+      amuletRulesCid = amuletRulesCid
+      transferInsts = expireBatchChoiceTrue 
+      sv = sv1    
+
+  let expireBatchChoiceFalse = AmuletRules_Amulet_ExpireTransferInstructions with
+        expectedDso = app.dso
+        inputs = [AmuletRules_ExpireTransferInstructionInput with 
+                    transferInstructionCid = instrInterfaceCid
+                    expireLock = False]
+        observers = stakeholders
+
+  submit (actAs sv1 <> readAs app.dso) $ 
+    exerciseCmd dsoRulesCid DsoRules_Amulet_ExpireTransferInstructions with
+      amuletRulesCid = amuletRulesCid
+      transferInsts = expireBatchChoiceFalse 
+      sv = sv1
+
+  instructions <- query @AmuletTransferInstruction app.dso
+  instructions === []
+  pure ()
+
+testExpireAmuletAllocation : Script ()
+testExpireAmuletAllocation = do
+  (app, _, (sv1, _, _, _)) <- initDevNet
+  sender <- setupUser app "sender" app.dso
+  _  <- tap app sender 100.0
+  
+  let registry = AmuletRegistry.AmuletRegistry
+        with
+          dso = app.dso
+          instrumentId = InstrumentId
+            with
+              admin = app.dso
+              id = "Amulet"
+              
+  liquidAmulets <- query @Amulet sender.primaryParty
+  let totalBalance = sum (map (\(_, a) -> a.amount.initialAmount) liquidAmulets)
+  let senderAmuletCids = map fst liquidAmulets            
+  
+  receiver <- allocateParty "receiver"
+  executor <- allocateParty "executor"
+  now <- getTime
+  
+  allocationReq <- RegistryApi.getAllocationFactory registry AllocationInstructionV1.AllocationFactory_Allocate
+    with
+      expectedAdmin = app.dso
+      allocation = AllocationV1.AllocationSpecification with
+        settlement = AllocationV1.SettlementInfo with
+          executor = executor
+          settlementRef = AllocationV1.Reference "test-settlement" None
+          requestedAt = now
+          allocateBefore = now `addRelTime` minutes 30
+          settleBefore = now `addRelTime` hours 1
+          meta = emptyMetadata
+        transferLegId = "leg-1"
+        transferLeg = AllocationV1.TransferLeg with
+          sender = sender.primaryParty
+          receiver = receiver
+          amount = totalBalance
+          instrumentId = registry.instrumentId
+          meta = emptyMetadata
+      requestedAt = now 
+      inputHoldingCids = map toInterfaceContractId senderAmuletCids
+      extraArgs = ExtraArgs with
+        context = emptyChoiceContext
+        meta = emptyMetadata
+
+  submitWithDisclosures' sender.primaryParty allocationReq.disclosures $ exerciseCmd allocationReq.factoryCid allocationReq.arg
+
+  lockedAmuletsBeforeExpire <- query @LockedAmulet sender.primaryParty
+  length lockedAmuletsBeforeExpire === 1          
+
+  liquidAmuletsBeforeExpire <- query @Amulet sender.primaryParty
+  assertMsg "Sender liquid wallet should be truly empty" (null liquidAmuletsBeforeExpire)
+
+  [(dsoRulesCid, _)] <- query @DsoRules app.dso
+  [(extRulesCid, _)] <- query @ExternalPartyAmuletRules app.dso
+  [(allocCid, alloc)] <- query @AmuletAllocation app.dso
+  
+  let stakeholders = [alloc.allocation.transferLeg.sender, alloc.allocation.settlement.executor, alloc.allocation.transferLeg.receiver]
+
+  let expireBatchRequest = ExternalPartyAmuletRules_ExpireAmuletAllocations with
+        expectedDso = app.dso
+        inputs = [ExternalPartyAmuletRules_ExpireAmuletAllocationInput with 
+                    allocationCid = allocCid
+                    expireLock = True]
+        observers = stakeholders
+
+  submitMustFail (actAs sv1 <> readAs app.dso) $ 
+    exerciseCmd dsoRulesCid DsoRules_ExpireAmuletAllocations with
+      extAmuletRulesCid = extRulesCid
+      expireAllocations = expireBatchRequest 
+      sv = sv1    
+
+  passTime (hours 2)
+
+  submit (actAs sv1 <> readAs app.dso) $ 
+    exerciseCmd dsoRulesCid DsoRules_ExpireAmuletAllocations with
+      extAmuletRulesCid = extRulesCid
+      expireAllocations = expireBatchRequest 
+      sv = sv1
+
+  lockedAmuletsAfterExpire <- query @LockedAmulet sender.primaryParty
+  length lockedAmuletsAfterExpire === 0  
+
+  allocations <- query @AmuletAllocation app.dso
+  allocations === []
+
+  senderAmulets <- query @Amulet sender.primaryParty
+  assertMsg "Sender should have their amulets back" (not $ null senderAmulets) 
+
+  let totalBalanceAfter = sum (map (\(_, a) -> a.amount.initialAmount) senderAmulets)
+  assertMsg ("Balance should be recovered, but got: " <> show totalBalanceAfter)
+            (totalBalanceAfter == totalBalance)
+
+  pure ()
+
+testExpireAmuletAllocationAlreadyUnlocked : Script ()
+testExpireAmuletAllocationAlreadyUnlocked = do
+  (app, _, (sv1, _, _, _)) <- initDevNet
+  sender <- setupUser app "sender" app.dso
+  _  <- tap app sender 100.0
+  let registry = AmuletRegistry.AmuletRegistry
+        with
+          dso = app.dso
+          instrumentId = InstrumentId
+            with
+              admin = app.dso
+              id = "Amulet"
+
+  liquidAmulets <- query @Amulet sender.primaryParty
+  let totalBalance = sum (map (\(_, a) -> a.amount.initialAmount) liquidAmulets)
+  let senderAmuletCids = map fst liquidAmulets            
+  
+  receiver <- allocateParty "receiver"
+  executor <- allocateParty "executor"
+  now <- getTime
+  
+  allocationReq <- RegistryApi.getAllocationFactory registry AllocationInstructionV1.AllocationFactory_Allocate
+    with
+      expectedAdmin = app.dso
+      allocation = AllocationV1.AllocationSpecification with
+        settlement = AllocationV1.SettlementInfo with
+          executor = executor
+          settlementRef = AllocationV1.Reference "test-settlement" None
+          requestedAt = now
+          allocateBefore = now `addRelTime` minutes 30
+          settleBefore = now `addRelTime` hours 1
+          meta = emptyMetadata
+        transferLegId = "leg-1"
+        transferLeg = AllocationV1.TransferLeg with
+          sender = sender.primaryParty
+          receiver = receiver
+          amount = totalBalance
+          instrumentId = registry.instrumentId
+          meta = emptyMetadata
+      requestedAt = now 
+      inputHoldingCids = map toInterfaceContractId senderAmuletCids
+      extraArgs = ExtraArgs with
+        context = emptyChoiceContext
+        meta = emptyMetadata
+
+  submitWithDisclosures' sender.primaryParty allocationReq.disclosures $ exerciseCmd allocationReq.factoryCid allocationReq.arg
+
+  passTime (hours 2)
+
+  [(lockedAmuletCid, _)] <- query @LockedAmulet sender.primaryParty
+  submit sender.primaryParty $ exerciseCmd lockedAmuletCid LockedAmulet_OwnerExpireLockV2
+
+  lockedAmuletsAfterOwnerExpire <- query @LockedAmulet sender.primaryParty
+  lockedAmuletsAfterOwnerExpire === []  
+
+  [(dsoRulesCid, _)] <- query @DsoRules app.dso
+  [(extRulesCid, _)] <- query @ExternalPartyAmuletRules app.dso
+  [(allocCid, alloc)] <- query @AmuletAllocation app.dso
+  
+  let stakeholders = [alloc.allocation.transferLeg.sender, alloc.allocation.settlement.executor, alloc.allocation.transferLeg.receiver]
+
+  let expireBatchRequestTrue = ExternalPartyAmuletRules_ExpireAmuletAllocations with
+        expectedDso = app.dso
+        inputs = [ExternalPartyAmuletRules_ExpireAmuletAllocationInput with 
+                    allocationCid = allocCid
+                    expireLock = True]
+        observers = stakeholders
+
+  submitMustFail (actAs sv1 <> readAs app.dso) $ 
+    exerciseCmd dsoRulesCid DsoRules_ExpireAmuletAllocations with
+      extAmuletRulesCid = extRulesCid
+      expireAllocations = expireBatchRequestTrue 
+      sv = sv1    
+
+  let expireBatchRequestFalse = ExternalPartyAmuletRules_ExpireAmuletAllocations with
+        expectedDso = app.dso
+        inputs = [ExternalPartyAmuletRules_ExpireAmuletAllocationInput with 
+                    allocationCid = allocCid
+                    expireLock = False]
+        observers = stakeholders
+
+  submit (actAs sv1 <> readAs app.dso) $ 
+    exerciseCmd dsoRulesCid DsoRules_ExpireAmuletAllocations with
+      extAmuletRulesCid = extRulesCid
+      expireAllocations = expireBatchRequestFalse 
+      sv = sv1
+
+  allocations <- query @AmuletAllocation app.dso
+  allocations === []
+  pure ()  

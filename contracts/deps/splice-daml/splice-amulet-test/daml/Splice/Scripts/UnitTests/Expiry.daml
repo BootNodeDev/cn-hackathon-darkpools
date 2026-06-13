@@ -1,0 +1,84 @@
+-- Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module Splice.Scripts.UnitTests.Expiry where
+
+import Splice.Amulet.TokenApiUtils
+import Splice.Expiry
+import Splice.Fees
+import Splice.Types
+
+import DA.Assert
+import DA.Time
+
+import Daml.Script
+
+
+test_timeLockEncoding : Script ()
+test_timeLockEncoding = do
+    alice <- allocateParty "alice"
+    bob <- allocateParty "bob"
+    now <- getTime
+    let testLock1 = TimeLock with
+          holders = [alice, bob]
+          expiresAt = now `addRelTime` days 1
+          optContext = Some "foobar"
+
+    let testLock2 = TimeLock with
+          holders = [alice, alice, bob]
+          expiresAt = now `addRelTime` days 2
+          optContext = None
+
+    fromAnyValue (toAnyValue testLock1) === Right testLock1
+    fromAnyValue (toAnyValue testLock2) === Right testLock2
+
+
+testBoundedSet : Script ()
+testBoundedSet = script do
+  let rate = RatePerRound 0.000005
+      round0 = Round 0
+      round1 = Round 1
+  -- overflow when applying div
+  amountExpiresAt (expiringAmount rate maxDecimalDiv10 round0) === AfterMaxBound
+  amountExpiresAt (expiringAmount rate 49999999999999999999999.9999999999 round0) === AfterMaxBound
+
+  -- overflow when applying ceiling
+  amountExpiresAt (expiringAmount rate 46116860184273.87903505 round0) === AfterMaxBound
+
+  -- overflow when applying addBoundedRelRound
+  amountExpiresAt (expiringAmount rate 46116860184273.879035 round1) === AfterMaxBound
+
+  -- no overflow
+  amountExpiresAt (expiringAmount rate 46116860184273.879035 round0) === Singleton (Round maxInt)
+  amountExpiresAt (expiringAmount rate 46116860184273.87903 round1) === Singleton (Round maxInt)
+  amountExpiresAt (expiringAmount rate 46116860184273.87903 round0) === Singleton (Round (maxInt - 1))
+  return ()
+
+testAmountExpiresAt : Script ()
+testAmountExpiresAt = do
+  let largeAmount = ExpiringAmount with
+        initialAmount = 26116860184273.879035
+        createdAt = Round 4000000000000000000
+        ratePerRound = RatePerRound(0.000005)
+  amountExpiresAt largeAmount === Singleton (Round(maxInt))
+
+  let largeAmountThatOverflow = largeAmount with
+        initialAmount = largeAmount.initialAmount + 0.000005
+  amountExpiresAt largeAmountThatOverflow === AfterMaxBound
+
+  let largeAmountCreatedAt0ThatOverflow = ExpiringAmount with
+        initialAmount = 46116860184273.87904
+        createdAt = Round 0
+        ratePerRound = RatePerRound(0.000005)
+  amountExpiresAt largeAmountCreatedAt0ThatOverflow === AfterMaxBound
+
+  let amountWithLargestAmountAndLeastHoldingFee = ExpiringAmount with
+        initialAmount = maxDecimalDiv10
+        createdAt = Round 0
+        ratePerRound = RatePerRound(0.0000000001)
+  amountExpiresAt amountWithLargestAmountAndLeastHoldingFee === AfterMaxBound
+
+addRelRoundN : Int -> Time -> RelTime -> Time
+addRelRoundN n t relTime
+  | n <= 0 = t
+  | otherwise = addRelRoundN (n-1) (addRelTime t relTime) relTime

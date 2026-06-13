@@ -1,0 +1,66 @@
+-- Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module Splice.Testing.CryptoHashProxy where
+
+import Splice.Amulet.CryptoHash (Hash(..), Hashable(..), hashVariant)
+import Splice.Amulet.RewardAccountingV2 (Batch, MintingAllowance(..))
+
+-- | Proxy template exposing hash functions as exercisable choices.
+-- Allows Scala integration tests to call Daml hash functions via the
+-- ledger API and compare results to SQL implementations.
+template CryptoHashProxy with
+    owner : Party
+  where
+    signatory owner
+
+    nonconsuming choice CryptoHashProxy_HashText : Text
+      with
+        input : Text
+      controller owner
+      do pure (hash input).value
+
+    nonconsuming choice CryptoHashProxy_HashList : Text
+      with
+        elems : [Text]
+      controller owner
+      do pure (hash (map Hash elems)).value
+
+    nonconsuming choice CryptoHashProxy_HashVariant : Text
+      with
+        tag : Text
+        fields : [Text]
+      controller owner
+      do pure (hashVariant tag (map Hash fields)).value
+
+    nonconsuming choice CryptoHashProxy_HashMintingAllowance : Text
+      with
+        provider : Party
+        amount : Decimal
+      controller owner
+      do pure (hash (MintingAllowance provider amount)).value
+
+    nonconsuming choice CryptoHashProxy_HashBatchOfMintingAllowances : Text
+      with
+        allowanceHashes : [Text]
+      controller owner
+      do pure (hashVariant "BatchOfMintingAllowances" [hash (map Hash allowanceHashes)]).value
+
+    nonconsuming choice CryptoHashProxy_HashBatchOfBatches : Text
+      with
+        childHashes : [Text]
+      controller owner
+      do pure (hashVariant "BatchOfBatches" [hash (map Hash childHashes)]).value
+
+    nonconsuming choice CryptoHashProxy_HashDecimal : Text
+      with
+        input : Decimal
+      controller owner
+      do pure (hash input).value
+
+    nonconsuming choice CryptoHashProxy_HashBatch : Text
+      with
+        batch : Batch
+      controller owner
+      do pure (hash batch).value
+

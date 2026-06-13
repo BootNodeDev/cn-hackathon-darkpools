@@ -1,0 +1,45 @@
+-- Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module Splice.Scripts.TestExpectedDsoParty where
+
+import Daml.Script
+
+import Splice.AmuletRules
+import Splice.Scripts.Util
+
+-- | Test that the checks on the expected DSO party work
+testExpectedDsoParty_Transfer : Script ()
+testExpectedDsoParty_Transfer = do
+  defaultAppWithUsers <- setupDefaultAppWithUsers
+  let DefaultAppWithUsers{..} = defaultAppWithUsers
+
+  let amulet1Amount = 100.0
+  let outputAmount1 = 20.00
+
+  amulet1 <- tap app alice amulet1Amount
+
+  context <- getPaymentTransferContext app alice
+  let transferChoice = AmuletRules_Transfer with
+        transfer = Transfer with
+          sender = alice.primaryParty
+          provider = alice.primaryParty
+          inputs = [InputAmulet amulet1]
+          outputs = [ TransferOutput with
+                        receiver = bob.primaryParty
+                        receiverFeeRatio = 0.0
+                        amount = outputAmount1
+                        lock = None
+                    ]
+          beneficiaries = None
+        context = context.context
+        expectedDso = None
+
+  submitMustFail (actAs alice.primaryParty <> actAs bob.primaryParty <> actAs provider1.primaryParty <> readAs app.dso) $ exerciseCmd context.amuletRules
+    transferChoice
+  submitMustFail (actAs alice.primaryParty <> actAs bob.primaryParty <> actAs provider1.primaryParty <> readAs app.dso) $ exerciseCmd context.amuletRules
+    transferChoice with expectedDso = Some alice.primaryParty
+  submit (actAs alice.primaryParty <> actAs bob.primaryParty <> actAs provider1.primaryParty <> readAs app.dso) $ exerciseCmd context.amuletRules
+    transferChoice with expectedDso = Some app.dso
+
+  pure ()
