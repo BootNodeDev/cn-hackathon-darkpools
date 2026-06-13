@@ -1,4 +1,4 @@
-# Architecture Overview — frontend
+# Architecture Overview: frontend
 
 The trading dApp. Built with Vite + React 18 + Tailwind v4 + TanStack Router. Two views: trader (`/`) and venue (`/venue`). Both read from the `DarkPoolClient` interface, which talks to the `backend/` dark pool service over REST. A mock client implementing the same interface backs offline development. Deployed at https://darkpools.cc/.
 
@@ -29,7 +29,7 @@ src/
   features/
     trade/                  trader view components (order form, open orders, fills, balances)
     venue/                  venue view components (full book, match trigger, schedule)
-  components/               shared UI primitives (Stat, SideTag, TraderChip, ui/* — Select, Tooltip, Toast, …)
+  components/               shared UI primitives (Stat, SideTag, TraderChip, ui/*: Select, Tooltip, Toast, …)
   theme/                    theme tokens / provider
   utils/                    pure helpers
 test/
@@ -65,7 +65,7 @@ flowchart TD
 
 ### `DarkPoolClient`
 
-`src/darkpool/types.ts` defines the interface. The provider, hooks, components, and tests all talk to this interface only -- never to a concrete client. This is the seam between the UI and its data source: the HTTP client points at the `backend/` service, and the mock client serves the same shape entirely in the browser for offline development. Selecting one over the other is a single decision in `DarkPoolProvider.tsx`.
+`src/darkpool/types.ts` defines the interface. The provider, hooks, components, and tests all talk to this interface only, never to a concrete client. This is the seam between the UI and its data source: the HTTP client points at the `backend/` service, and the mock client serves the same shape entirely in the browser for offline development. Selecting one over the other is a single decision in `DarkPoolProvider.tsx`.
 
 ### Hooks (`src/darkpool/hooks.ts`)
 
@@ -92,4 +92,4 @@ All Canton wallet interactions go through `canton-connect-kit` (a workspace pack
 
 ## Configuration
 
-The frontend needs no environment variables to run -- the Canton network and wallet-companion URL are set in-app and persisted to `localStorage` (`src/runtimeConfig.ts`). The backend base URL is read from `VITE_DARK_POOL_API` (defaults to `http://localhost:3020`); the mock client requires nothing.
+The frontend needs no environment variables to run; the Canton network and wallet-companion URL are set in-app and persisted to `localStorage` (`src/runtimeConfig.ts`). The backend base URL is read from `VITE_DARK_POOL_API` (defaults to `http://localhost:3020`); the mock client requires nothing.

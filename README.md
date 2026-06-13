@@ -1,6 +1,6 @@
 # CN Dark Pools
 
-A dark pool trading venue built on the Canton Network. Traders place private limit orders; the venue pairs crossing orders and settles them atomically at the midpoint price. The privacy comes from Canton's per-party data model -- an order's only stakeholders are the trader and the venue, so nobody else can see the book.
+A dark pool trading venue built on the Canton Network. Traders place private limit orders; the venue pairs crossing orders and settles them atomically at the midpoint price. The privacy comes from Canton's per-party data model: an order's only stakeholders are the trader and the venue, so nobody else can see the book.
 
 Live at https://darkpools.cc/.
 
@@ -9,8 +9,8 @@ Live at https://darkpools.cc/.
 | Package | What it is | Port |
 |---------|-----------|------|
 | [`frontend/`](frontend/) | React/Vite trading dApp (trader + venue views) | 3012 |
-| [`backend/`](backend/) | Express dark pool service -- matcher, scheduler, settlement | 3020 |
-| [`contracts/`](contracts/) | Daml smart contracts -- dark pool venue + registry token | n/a |
+| [`backend/`](backend/) | Express dark pool service: matcher, scheduler, settlement | 3020 |
+| [`contracts/`](contracts/) | Daml smart contracts: dark pool venue and registry token | n/a |
 | [`canton-connect-kit/`](canton-connect-kit/) | wagmi-style React hooks for Canton wallet connections | n/a (library) |
 | [`wallet/`](wallet/) | Carpincho browser extension (pre-built, load unpacked) | n/a |
 
@@ -20,7 +20,7 @@ Live at https://darkpools.cc/.
 
 - Node.js >= 24
 - npm >= 7
-- Carpincho browser extension -- load from `wallet/dist-extension/` (see [`wallet/README.md`](wallet/README.md))
+- Carpincho browser extension: load from `wallet/dist-extension/` (see [`wallet/README.md`](wallet/README.md))
 - Docker (for the containerized backend)
 - `dpm` with SDK 3.4.11 + JDK 17+ (contracts only)
 
@@ -40,7 +40,7 @@ npm run app:dev
 
 Opens at http://localhost:3012. Click **Connect Carpincho** and approve in the extension.
 
-The frontend reads its data from the backend at `VITE_DARK_POOL_API` (defaults to `http://localhost:3020`). For UI work without a backend running, it also ships a mock dark pool client -- a complete in-browser simulation with seeded orders and a live matching engine -- so the app is fully clickable on its own.
+The frontend reads its data from the backend at `VITE_DARK_POOL_API` (defaults to `http://localhost:3020`). For UI work without a backend running, it also ships a mock dark pool client, a complete in-browser simulation with seeded orders and a live matching engine, so the app is fully clickable on its own.
 
 ## Running the backend
 

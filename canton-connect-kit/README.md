@@ -8,8 +8,8 @@ canonical CIP-0103 provider surface.
 
 The Canton ecosystem has the equivalent of `ethers.js`
 (`@canton-network/dapp-sdk`, `@canton-network/core-splice-provider`), but
-there's no widely-adopted equivalent of `wagmi` / `RainbowKit` / `ConnectKit`
-— the React layer that:
+there's no widely-adopted equivalent of `wagmi` / `RainbowKit` / `ConnectKit`,
+the React layer that:
 
 - Provides hooks (`useConnect`, `useParty`, `useSignMessage`, …)
 - Bundles connectors (injected extension, WalletConnect)
@@ -21,7 +21,7 @@ the scaffold should recognise the patterns from day one.
 
 ## Status
 
-Early — used by the `frontend/` dApp in this repo. Not yet a published
+Early, used by the `frontend/` dApp in this repo. Not yet a published
 artifact. The hook signatures are stable enough to depend on; the
 implementation underneath may swap to delegate to `@partylayer/sdk` if that
 ecosystem matures.
@@ -59,7 +59,7 @@ function Dapp() {
   const { ledgerApi } = useLedger()
 
   if (isLocked) {
-    return <p>Wallet locked — please unlock your wallet to continue.</p>
+    return <p>Wallet locked, please unlock your wallet to continue.</p>
   }
 
   // ... your dApp

@@ -1,4 +1,4 @@
-# Agent Configuration — canton-connect-kit
+# Agent Configuration: canton-connect-kit
 
 This file applies only to `canton-connect-kit/`. For monorepo-wide rules, see [`../AGENTS.md`](../AGENTS.md).
 

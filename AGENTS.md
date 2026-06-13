@@ -1,14 +1,14 @@
-# Agent Configuration — CN Dark Pools
+# Agent Configuration: CN Dark Pools
 
 This file is the canonical monorepo-wide agent configuration. `CLAUDE.md` files are compatibility shims that point here or to a sibling `AGENTS.md`. Each subproject layers its own `AGENTS.md` for stack-specific deltas.
 
 Subproject docs:
 
-- [`frontend/AGENTS.md`](frontend/AGENTS.md) — React/Vite trading dApp
-- [`backend/AGENTS.md`](backend/AGENTS.md) — Express dark pool service
-- [`contracts/AGENTS.md`](contracts/AGENTS.md) — Daml contracts + registry token
-- [`canton-connect-kit/AGENTS.md`](canton-connect-kit/AGENTS.md) — wagmi-style Canton hooks
-- [`wallet/`](wallet/) — pre-built Carpincho extension (no source, no AGENTS.md)
+- [`frontend/AGENTS.md`](frontend/AGENTS.md): React/Vite trading dApp
+- [`backend/AGENTS.md`](backend/AGENTS.md): Express dark pool service
+- [`contracts/AGENTS.md`](contracts/AGENTS.md): Daml contracts and registry token
+- [`canton-connect-kit/AGENTS.md`](canton-connect-kit/AGENTS.md): wagmi-style Canton hooks
+- [`wallet/`](wallet/): pre-built Carpincho extension (no source, no AGENTS.md)
 
 For the system shape and data flow, see [`architecture.md`](architecture.md).
 
@@ -34,7 +34,7 @@ Current distribution:
 | `canton-connect-kit/` | yes | yes | shim | yes |
 | `wallet/` | yes | no | shim | no (pre-built binary only) |
 
-Subproject docs must not restate root rules -- only local deltas and upward links.
+Subproject docs must not restate root rules, only local deltas and upward links.
 
 ---
 
@@ -55,9 +55,9 @@ Subproject docs must not restate root rules -- only local deltas and upward link
 
 | Path | Purpose | Stack | Port |
 |------|---------|-------|------|
-| [`frontend/`](frontend/) | Dark pool trading dApp -- trader and venue views | Vite 6 + React 18 + Tailwind v4 + Radix UI + TanStack Router | 3012 |
-| [`backend/`](backend/) | Off-ledger dark pool service -- matcher, scheduler, settlement, REST API | Node 24 + Express 5 + TypeScript | 3020 |
-| [`contracts/`](contracts/) | Daml smart contracts -- dark pool venue + registry token | Daml (dpm, SDK 3.4.11) | n/a |
+| [`frontend/`](frontend/) | Dark pool trading dApp: trader and venue views | Vite 6 + React 18 + Tailwind v4 + Radix UI + TanStack Router | 3012 |
+| [`backend/`](backend/) | Off-ledger dark pool service: matcher, scheduler, settlement, REST API | Node 24 + Express 5 + TypeScript | 3020 |
+| [`contracts/`](contracts/) | Daml smart contracts: dark pool venue and registry token | Daml (dpm, SDK 3.4.11) | n/a |
 | [`canton-connect-kit/`](canton-connect-kit/) | wagmi-style React hooks for CIP-0103 wallet connections | TypeScript + React 18 | n/a (library) |
 | [`wallet/`](wallet/) | Pre-built Carpincho browser extension (load unpacked from `wallet/dist-extension/`) | binary | n/a |
 
@@ -73,7 +73,7 @@ Subproject docs must not restate root rules -- only local deltas and upward link
 
 - Use **npm** only (never pnpm or yarn).
 - npm workspaces monorepo: one `npm install` from root installs and links everything.
-- Contracts (`contracts/`) are NOT an npm workspace -- build and test from that directory with their own `npm install`.
+- Contracts (`contracts/`) are NOT an npm workspace; build and test from that directory with their own `npm install`.
 - Run a workspace script via `npm --prefix <subproject> run <script>` or the root orchestration scripts in `package.json`.
 - Local ports: `3012` (frontend), `3020` (backend). Do not reassign without updating all defaults.
 - Single root `package-lock.json` is authoritative. Do not regenerate it during unrelated changes.
@@ -126,7 +126,7 @@ Allowed prefixes (enforced by [`commitlint.config.js`](commitlint.config.js)):
 
 - Every PR must reference an issue (`Closes #N`). No issue? Use `No related issue.` on the first line.
 - Mirror the issue's acceptance criteria in the PR.
-- Keep PRs small and focused -- one issue, one PR.
+- Keep PRs small and focused: one issue, one PR.
 - PR titles use Conventional Commit format.
 - The `create-pr` skill at `.claude/skills/create-pr/` reads [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md) and fills every section automatically.
 
@@ -147,7 +147,7 @@ Priority labels (bugs, features, epics):
 - Do not modify CI/CD pipelines without team review.
 - Do not skip tests or linting to make a build pass.
 - Do not bypass husky hooks (`--no-verify`) unless explicitly asked.
-- When in doubt, ask -- don't assume.
+- When in doubt, ask, don't assume.
 
 ## Change Strategy
 

@@ -1,8 +1,8 @@
-# Architecture Overview — contracts
+# Architecture Overview: contracts
 
 Daml smart contracts for the CN Dark Pools venue. Four packages: two production packages (`dark-pool`, `registry-token`) and two test packages (`dark-pool-test`, `registry-token-test`).
 
-For the full design deep-dive -- party trust model, the `FillAuthority` settlement chain, funding validation, privacy analysis, and deployment topologies -- see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+For the full design deep-dive (party trust model, the `FillAuthority` settlement chain, funding validation, privacy analysis, and deployment topologies), see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Package Layout
 
@@ -41,19 +41,19 @@ Test packages may depend on Amulet (splice-amulet 0.1.19) and the token-standard
 One trading pair operated by one venue. Fields: `venue`, `poolId`, `base`, `quote` (instrument pair), `minFillFloor`.
 
 Choices:
-- `DarkPool_PlaceOrder` (nonconsuming, controller trader) -- validates declared funding on-ledger; creates an `Order` pool-consistent from birth.
-- `DarkPool_Match` (nonconsuming, controller venue) -- the atomic match and settle.
+- `DarkPool_PlaceOrder` (nonconsuming, controller trader): validates declared funding on-ledger; creates an `Order` pool-consistent from birth.
+- `DarkPool_Match` (nonconsuming, controller venue): the atomic match and settle.
 
 ### `Order`
 
-A dark resting limit order. Stakeholders: trader (signatory) and venue (observer). That pair is the entire privacy mechanism -- no other party, including the counterparty, can see it.
+A dark resting limit order. Stakeholders: trader (signatory) and venue (observer). That pair is the entire privacy mechanism: no other party, including the counterparty, can see it.
 
 Fields: `trader`, `venue`, `poolId`, `base`, `quote`, `side`, `quantity`, `limitPrice`, `minFill`, `expiresAt`, `holdingCids`.
 
 Choices:
 - `Order_Cancel` (controller trader)
-- `Order_Reject` (controller venue) -- housekeeping for expired or unfundable orders
-- `Order_Fill` (controller venue) -- re-validates all terms, builds allocation, creates `FillAuthority` and optional remainder
+- `Order_Reject` (controller venue): housekeeping for expired or unfundable orders
+- `Order_Fill` (controller venue): re-validates all terms, builds allocation, creates `FillAuthority` and optional remainder
 
 ### `FillAuthority`
 
@@ -63,10 +63,10 @@ Transient authority vehicle created and consumed inside one `DarkPool_Match` tra
 
 `DarkPool_Match` executes in one atomic transaction:
 
-1. **Validate** -- pool membership, opposite sides, no self-match, floor, deadline order, crossing limits.
-2. **Price and size** -- `execPrice = floorTo10((buyLimit + sellLimit) / 2)`, `fillQty = min(buyQty, sellQty)`. Assert both `minFill` constraints.
-3. **Stage 1 (sibling subtrees)** -- `Order_Fill` on buy order, then on sell order. Sibling subtrees: trader A is not an informee of trader B's subtree, preserving book privacy.
-4. **Stage 2 (joint settlement)** -- `FillAuthority_Settle` on the buy leg, reaching across to the sell leg via `FillAuthority_SettleWith`, executing both `Allocation_ExecuteTransfer`s under combined `{buyer, seller, venue}` authority.
+1. **Validate**: pool membership, opposite sides, no self-match, floor, deadline order, crossing limits.
+2. **Price and size**: `execPrice = floorTo10((buyLimit + sellLimit) / 2)`, `fillQty = min(buyQty, sellQty)`. Assert both `minFill` constraints.
+3. **Stage 1 (sibling subtrees)**: `Order_Fill` on buy order, then on sell order. Sibling subtrees: trader A is not an informee of trader B's subtree, preserving book privacy.
+4. **Stage 2 (joint settlement)**: `FillAuthority_Settle` on the buy leg, reaching across to the sell leg via `FillAuthority_SettleWith`, executing both `Allocation_ExecuteTransfer`s under combined `{buyer, seller, venue}` authority.
 
 ## Privacy Model
 

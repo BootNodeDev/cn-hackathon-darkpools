@@ -1,4 +1,4 @@
-# Agent Configuration — frontend
+# Agent Configuration: frontend
 
 This file applies only to `frontend/`. For monorepo-wide rules, see [`../AGENTS.md`](../AGENTS.md).
 
@@ -10,9 +10,9 @@ The dark pool trading dApp. Two views: the trader view (`/`) for placing and wat
 
 - Keep the `DarkPoolClient` interface as the abstraction boundary between the UI and the data layer. Components must not reach past it into mock or HTTP internals.
 - All Canton wallet interactions go through `canton-connect-kit` hooks (`useConnect`, `useParty`, `useWalletStatus`, `useExecute`). Do not call `@canton-network/dapp-sdk` directly from components.
-- The venue view (`/venue`) is operator-only -- it is not linked from nav. Only the venue's wallet sees full book data; the backend's `/venue` endpoint is the operator-only surface.
+- The venue view (`/venue`) is operator-only: it is not linked from nav. Only the venue's wallet sees full book data; the backend's `/venue` endpoint is the operator-only surface.
 - Pricing and formatting helpers live in `src/darkpool/` (`darkpoolMath.ts`, `format.ts`) and must stay covered by tests. Do not move them inline into components.
-- Use the `@/` alias for every import that resolves inside `src/`. Never include the file extension -- Biome's `noRestrictedImports` rejects both relative `src` paths and `.ts`/`.tsx` suffixes (see the root `biome.json` override). Tests are exempt from the alias rule.
+- Use the `@/` alias for every import that resolves inside `src/`. Never include the file extension. Biome's `noRestrictedImports` rejects both relative `src` paths and `.ts`/`.tsx` suffixes (see the root `biome.json` override). Tests are exempt from the alias rule.
 
 ## Architecture
 

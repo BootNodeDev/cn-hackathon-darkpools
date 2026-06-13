@@ -1,4 +1,4 @@
-# Architecture Overview — backend
+# Architecture Overview: backend
 
 Off-ledger dark pool service. Single Express 5 process; in-process matcher and scheduler; JSON Ledger API v2 client. Runs fully offline in mock mode.
 
@@ -7,7 +7,7 @@ Off-ledger dark pool service. Single Express 5 process; in-process matcher and s
 ```
 src/
   server.ts         HTTP server entry point; wires app and starts scheduler
-  wiring.ts         dependency injection -- assembles all modules
+  wiring.ts         dependency injection; assembles all modules
   config.ts         resolves env vars and auth source
   auth.ts           static / M2M / mock bearer token provider
   types.ts          shared domain types (Order, Fill, Pool, Balance, MatchPlan, etc.)

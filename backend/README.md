@@ -8,7 +8,7 @@ It also runs fully offline in **mock mode** (`DARK_POOL_MOCK=1`) against an in-m
 
 - **A Canton ledger over JSON Ledger API v2** hosts the dark-pool venue contracts and a funding/faucet token, with a pool + parties + seed holdings provisioned (the contracts side, [`../contracts/`](../contracts/)). The service reads the addresses (parties, pool, factory, instruments) from the `dark-pool.bootstrap.json` it's pointed at.
 - **Custodial, co-hosted:** one bearer token can `actAs` the venue, the token-admin, and the trader parties. `POST /orders` acts as a co-hosted party; reads and `/faucet` work for any partyId.
-- **The ledger is the source of truth** — no database; an in-memory projection (polled ACS) backs reads and is rebuilt on boot.
+- **The ledger is the source of truth**: no database; an in-memory projection (polled ACS) backs reads and is rebuilt on boot.
 - **Decimals are strings**, computed as scaled BigInt to mirror the on-ledger rounding exactly.
 - **Mock mode** is self-contained (`DARK_POOL_MOCK=1`): an in-memory fake ledger with a seeded fixture, no Canton and no token needed.
 
@@ -18,13 +18,13 @@ Single process (the matcher is an in-process scheduled pass, not a daemon). The 
 
 ## 3. Where (module map)
 
-`src/`: `config` (resolves config + auth source), `auth` (static/M2M/mock bearer token), `ledger` (JSON Ledger API v2 client), `decimal` (exact 10-dp), `matcher` (pure price-time), `funding` (holding selection), `projection` (ACS → caches + reducers), `settlement` (`DarkPool_Match` + fail-closed), `scheduler` (guarded pass + heartbeat), `commands` (pure builders), `http` (routes), `server`/`wiring`, `types`; plus `mockLedger` + `mock-bootstrap.json` for offline runs. `test/` mirrors the critical modules + a mock integration test. (The contracts themselves are external — addressed by package name over the API.)
+`src/`: `config` (resolves config + auth source), `auth` (static/M2M/mock bearer token), `ledger` (JSON Ledger API v2 client), `decimal` (exact 10-dp), `matcher` (pure price-time), `funding` (holding selection), `projection` (ACS → caches + reducers), `settlement` (`DarkPool_Match` + fail-closed), `scheduler` (guarded pass + heartbeat), `commands` (pure builders), `http` (routes), `server`/`wiring`, `types`; plus `mockLedger` + `mock-bootstrap.json` for offline runs. `test/` mirrors the critical modules + a mock integration test. (The contracts themselves are external, addressed by package name over the API.)
 
 ## 4. How to run
 
 Run from the repo root (one `npm install` links every workspace).
 
-**Mock — offline, zero setup (use this to develop the frontend):**
+**Mock mode, offline with zero setup (use this to develop the frontend):**
 ```bash
 npm run backend:dev          # tsx watch, DARK_POOL_MOCK defaults on
 # or directly:
@@ -59,30 +59,30 @@ Port `3020`. JSON is shaped to the frontend's `DarkPoolClient` types.
 
 | Method · path | Body / query | Returns |
 | --- | --- | --- |
-| `GET /healthz` `/readyz` | — | health |
-| `GET /venue` | — | `{ pools: {[poolId]:{pool,book,trades,stats}}, schedule:{intervalMs,nextRunAt} }` — operator view, **full book** |
-| `GET /trade?party=` | `party` | `{ pools, orders, fills, balances }` — **own orders only** |
+| `GET /healthz` `/readyz` | (none) | health |
+| `GET /venue` | (none) | `{ pools: {[poolId]:{pool,book,trades,stats}}, schedule:{intervalMs,nextRunAt} }`, operator view, **full book** |
+| `GET /trade?party=` | `party` | `{ pools, orders, fills, balances }`, **own orders only** |
 | `POST /faucet` | `{party,instrument?,amount?}` | `{ balances }` |
 | `POST /orders` | `{party,side,quantity,limitPrice,minFill,poolId?,expiresAt?}` | `201 {order}` |
 | `DELETE /orders/:cid` | `{party}` | `{cancelled}` |
-| `POST /venue/match` | — | `{ranAt,matched,rejected,schedule}` — run a pass now |
-| `PUT /venue/schedule` | `{intervalMs}` | `{intervalMs,nextRunAt}` (bounds 1s–24h) |
+| `POST /venue/match` | (none) | `{ranAt,matched,rejected,schedule}`, run a pass now |
+| `PUT /venue/schedule` | `{intervalMs}` | `{intervalMs,nextRunAt}` (bounds 1s to 24h) |
 
 DTOs: `Order={cid,poolId,side,quantity,limitPrice,minFill,submittedAt,expiresAt}`, `Fill={tradeId,poolId,side,price,quantity,settledAt}`, `Trade={tradeId,poolId,price,quantity,buyer,seller,settledAt}`, `Balance={instrument,total,declared}`. All amounts are **strings**. Full request/response examples are in [`API.md`](API.md).
 
 **Frontend wiring (`frontend/src/darkpool/`):**
 1. The `DarkPoolClient` interface fronts the data layer; the HTTP client points at `VITE_DARK_POOL_API` (defaults to `http://localhost:3020`). The mock client backs offline development.
-2. The venue view polls `GET /venue`; the trade view polls `GET /trade?party=<connectedParty>` every ~2–3 s. `placeOrder`→`POST /orders`, `cancelOrder`→`DELETE /orders/:cid`, faucet→`POST /faucet`.
+2. The venue view polls `GET /venue`; the trade view polls `GET /trade?party=<connectedParty>` every ~2 to 3 s. `placeOrder`→`POST /orders`, `cancelOrder`→`DELETE /orders/:cid`, faucet→`POST /faucet`.
 3. Countdown: render `schedule.nextRunAt` (absolute) client-side; "Run matching now" → `POST /venue/match`; change cadence → `PUT /venue/schedule`.
-4. Darkness: the trade view only ever shows the caller's own orders — `/trade` returns only those; the full book is venue-only.
+4. Darkness: the trade view only ever shows the caller's own orders; `/trade` returns only those; the full book is venue-only.
 5. Type notes: `submittedAt` is a ledger ordering key (not ms); numbers are strings; `Pool` labels derive from `base.id`/`quote.id`.
 6. Identity: `POST /orders` acts as a co-hosted (seeded) party; reads/faucet take any partyId.
 
 ## 7. Contracts
 
-The dark-pool contracts and the funding/faucet token live in [`../contracts/`](../contracts/). The service depends only on their **deployed** package names + the `dark-pool.bootstrap.json` config. A ledger-provisioning script (`backend/scripts/dark-pool-bootstrap.mjs`) stands the ledger up: it allocates parties, creates the pool + factory, mints seed holdings, and emits that config. The dark pool settles a token that implements the Splice `AllocationFactory` standard — that is the `registry-token` package in `../contracts/`.
+The dark-pool contracts and the funding/faucet token live in [`../contracts/`](../contracts/). The service depends only on their **deployed** package names + the `dark-pool.bootstrap.json` config. A ledger-provisioning script (`backend/scripts/dark-pool-bootstrap.mjs`) stands the ledger up: it allocates parties, creates the pool + factory, mints seed holdings, and emits that config. The dark pool settles a token that implements the Splice `AllocationFactory` standard, which is the `registry-token` package in `../contracts/`.
 
 ## 8. Deploy
 
-- `Dockerfile` — multi-stage Node 24 build, built from the repo root so it uses the shared workspace lockfile. Builds the `@canton-dappbooster/dark-pool-service` workspace, `EXPOSE 3020`, `CMD ["node","dist/server.js"]`.
-- Root `docker-compose.yml` — the `dark-pool-backend` service runs the image (`3020:3020`, healthcheck `GET /healthz`). Driven by `npm run backend:up` / `backend:down` / `backend:logs`. It defaults to mock mode; for a live ledger, override the environment: set `CANTON_JSON_API_URL`, M2M creds (`FIVENORTH_*`) or `CANTON_BACKEND_TOKEN`, `DARK_POOL_BOOTSTRAP=<path to a mounted config>`, and optionally `MATCH_INTERVAL_MS` / `CORS_ORIGINS`. Pass secrets via env or an `--env-file`, never committed.
+- `Dockerfile`: multi-stage Node 24 build, built from the repo root so it uses the shared workspace lockfile. Builds the `@canton-dappbooster/dark-pool-service` workspace, `EXPOSE 3020`, `CMD ["node","dist/server.js"]`.
+- Root `docker-compose.yml`: the `dark-pool-backend` service runs the image (`3020:3020`, healthcheck `GET /healthz`). Driven by `npm run backend:up` / `backend:down` / `backend:logs`. It defaults to mock mode; for a live ledger, override the environment: set `CANTON_JSON_API_URL`, M2M creds (`FIVENORTH_*`) or `CANTON_BACKEND_TOKEN`, `DARK_POOL_BOOTSTRAP=<path to a mounted config>`, and optionally `MATCH_INTERVAL_MS` / `CORS_ORIGINS`. Pass secrets via env or an `--env-file`, never committed.

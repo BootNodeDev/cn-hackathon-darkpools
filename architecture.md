@@ -1,4 +1,4 @@
-# Architecture Overview — CN Dark Pools
+# Architecture Overview: CN Dark Pools
 
 ## Tech Stack
 
@@ -44,7 +44,7 @@ The matcher runs on a heartbeat (default 5 min) plus `POST /venue/match`. Each p
 
 ## State Boundaries
 
-- The frontend is stateless -- it polls the backend (or drives the mock) and renders.
+- The frontend is stateless: it polls the backend (or drives the mock) and renders.
 - The backend holds an in-memory projection polled from the ledger ACS. The ledger is the source of truth. Trade history is in memory and resets on restart.
 - The contracts enforce all economic rules on-ledger: price (midpoint), quantity bounds, minimum fills, settlement atomicity, remainder re-resting.
 - Canton's per-party visibility model is the privacy mechanism: an `Order` contract's only stakeholders are the trader and the venue.
@@ -67,7 +67,7 @@ The matcher runs on a heartbeat (default 5 min) plus `POST /venue/match`. Each p
 | `DARK_POOL_BOOTSTRAP` | `backend` env | Path to `dark-pool.bootstrap.json` (parties, pool, factory, instruments) |
 | `VITE_DARK_POOL_API` | `frontend` env | Backend base URL (defaults to `http://localhost:3020`) |
 
-Auth precedence in the backend: `DARK_POOL_MOCK=1` → mock; `CANTON_BACKEND_TOKEN` → static JWT; `FIVENORTH_CLIENT_SECRET` → M2M token exchange. The backend also reads `DARK_POOL_SERVICE_PORT`, `MATCH_INTERVAL_MS`, `CORS_ORIGINS`, and the `FIVENORTH_*` M2M knobs; see [`backend/AGENTS.md`](backend/AGENTS.md). The frontend needs no environment variables to run -- network and wallet-companion URL are set in-app and persisted to `localStorage`.
+Auth precedence in the backend: `DARK_POOL_MOCK=1` → mock; `CANTON_BACKEND_TOKEN` → static JWT; `FIVENORTH_CLIENT_SECRET` → M2M token exchange. The backend also reads `DARK_POOL_SERVICE_PORT`, `MATCH_INTERVAL_MS`, `CORS_ORIGINS`, and the `FIVENORTH_*` M2M knobs; see [`backend/AGENTS.md`](backend/AGENTS.md). The frontend needs no environment variables to run; network and wallet-companion URL are set in-app and persisted to `localStorage`.
 
 ## Contracts Package Layout
 

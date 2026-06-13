@@ -1,4 +1,4 @@
-# Architecture Overview — canton-connect-kit
+# Architecture Overview: canton-connect-kit
 
 `canton-connect-kit` is the React adapter layer between Canton dApps and CIP-0103 wallets. It gives consumers wagmi-style hooks while normalizing two wallet transports: the injected browser extension provider and optional WalletConnect.
 
