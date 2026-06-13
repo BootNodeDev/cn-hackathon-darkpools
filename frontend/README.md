@@ -28,16 +28,17 @@ pricing, atomic settlement, and self-funded remainders that re-rest.
 
 ## Running it
 
-You'll need Node 20+, the repo's dependencies installed (`npm install` from the
+You'll need Node 24+, the repo's dependencies installed (`npm install` from the
 repo root, which links every workspace), and the
-[Carpincho](https://github.com/BootNodeDev/carpincho) browser extension.
+[Carpincho](https://github.com/BootNodeDev/carpincho) browser extension (or load
+the pre-built build from `wallet/dist-extension/`).
 
 ```bash
 # from the repo root
 npm install
 
 # start the frontend
-npm run app:dev          # or: npm --workspace dapp/frontend run dev
+npm run app:dev          # or: npm --prefix frontend run dev
 ```
 
 The app comes up on http://localhost:3012. Click **Connect Carpincho**, approve
@@ -45,8 +46,9 @@ the request in the extension, and you're in. No environment variables are
 required; the Canton network and wallet-companion URL default sensibly and can
 be changed in-app (they persist to localStorage).
 
-If you want the full local stack (validator, wallet service) rather than just
-the frontend, see the scripts in `scripts/dev-stack.sh` at the repo root.
+To connect the frontend to the real backend instead of the mock, set
+`VITE_DARK_POOL_API=http://localhost:3020` in `frontend/.env.local` and start
+the backend with `npm run backend:up`.
 
 ## The two views
 
@@ -62,10 +64,10 @@ the frontend, see the scripts in `scripts/dev-stack.sh` at the repo root.
 ## Working on it
 
 ```bash
-npm --workspace dapp/frontend run dev      # dev server
-npm --workspace dapp/frontend run build    # type-check + production build
-npm --workspace dapp/frontend run test     # unit tests (node:test)
-npm --workspace dapp/frontend run lint     # biome
+npm --prefix frontend run dev      # dev server
+npm --prefix frontend run build    # type-check + production build
+npm --prefix frontend test         # unit tests (node:test)
+npm --prefix frontend run lint     # biome
 ```
 
 The pricing and matching logic lives in `src/darkpool/darkpoolMath.ts` and is
