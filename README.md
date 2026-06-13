@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/assets/banner.webp" alt="CN Dark Pools — trade without showing your hand" width="100%" />
+</p>
+
 # CN Dark Pools
 
 A dark pool trading venue built on the Canton Network. Traders place private limit orders; the venue pairs crossing orders and settles them atomically at the midpoint price. The privacy comes from Canton's per-party data model: an order's only stakeholders are the trader and the venue, so nobody else can see the book.
