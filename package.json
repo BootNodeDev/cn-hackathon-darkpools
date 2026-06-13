@@ -8,6 +8,9 @@
     "frontend",
     "canton-connect-kit"
   ],
+  "overrides": {
+    "@canton-network/dapp-sdk": "1.1.0"
+  },
   "scripts": {
     "backend:dev": "npm --prefix backend run dev",
     "backend:test": "npm --prefix backend test",
