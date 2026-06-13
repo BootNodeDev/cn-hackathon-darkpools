@@ -10,15 +10,35 @@ Live at https://darkpools.cc/.
 
 ## Monorepo layout
 
-| Package | What it is | Port |
-|---------|-----------|------|
-| [`frontend/`](frontend/) | Trading dApp | 3012 |
-| [`backend/`](backend/) | Dark pool service | 3020 |
-| [`contracts/`](contracts/) | Daml smart contracts | n/a |
-| [`canton-connect-kit/`](canton-connect-kit/) | wagmi-style React hooks for Canton wallet connections | n/a (library) |
-| [`wallet/`](wallet/) | Pre-built Carpincho browser extension | n/a |
+```mermaid
+flowchart LR
+    subgraph ws["npm workspace packages"]
+        FE["frontend/<br/>Trading dApp<br/>:3012"]
+        BE["backend/<br/>Dark pool service<br/>:3020"]
+        KIT["canton-connect-kit/<br/>wagmi-style Canton wallet hooks<br/>(library)"]
+    end
+    subgraph daml["standalone Daml project"]
+        C["contracts/<br/>Daml smart contracts"]
+    end
+    subgraph bin["pre-built binary"]
+        W["wallet/<br/>Carpincho extension"]
+    end
 
-`frontend`, `backend`, and `canton-connect-kit` are npm workspace packages. `contracts` is a standalone Daml project. `wallet/` is a pre-built binary and has no build step.
+    FE -->|REST| BE
+    BE -->|JSON Ledger API| C
+    FE -->|uses| KIT
+    KIT -->|CIP-0103| W
+
+    click FE "frontend/"
+    click BE "backend/"
+    click KIT "canton-connect-kit/"
+    click C "contracts/"
+    click W "wallet/"
+```
+
+Explore the same structure interactively at **[map.darkpools.cc](https://map.darkpools.cc/)**, a drill-down atlas of the venue from the full stack down to individual modules.
+
+`wallet/` ships pre-built and has no build step; the other four are built from source (`frontend`, `backend`, and `canton-connect-kit` as npm workspaces, `contracts` as a standalone Daml project).
 
 ## Requirements
 
