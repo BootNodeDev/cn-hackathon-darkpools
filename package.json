@@ -9,7 +9,15 @@
     "canton-connect-kit"
   ],
   "overrides": {
-    "@canton-network/dapp-sdk": "1.1.0"
+    "@canton-network/dapp-sdk": "1.1.0",
+    "@canton-network/core-provider-dapp": "1.4.0",
+    "@canton-network/core-rpc-transport": "1.4.0",
+    "@canton-network/core-splice-provider": "1.4.0",
+    "@canton-network/core-types": "1.4.0",
+    "@canton-network/core-wallet-dapp-remote-rpc-client": "1.4.0",
+    "@canton-network/core-wallet-dapp-rpc-client": "1.4.0",
+    "@canton-network/core-wallet-discovery": "1.4.0",
+    "@canton-network/core-wallet-ui-components": "1.4.0"
   },
   "scripts": {
     "backend:dev": "npm --prefix backend run dev",
