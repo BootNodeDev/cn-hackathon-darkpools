@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        A spike is not about delivering code — it's about answering a question. Define the question clearly, time-box the effort, and document findings here. The issue itself becomes the deliverable.
+        A spike is not about delivering code; it's about answering a question. Define the question clearly, time-box the effort, and document findings here. The issue itself becomes the deliverable.
 
   - type: textarea
     id: question

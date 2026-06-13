@@ -1,6 +1,6 @@
 ---
 name: sdlc:create-pr
-description: Use when creating a pull request -- reads the PR template, auto-fills from git context and linked issue, confirms with the user, then creates via gh CLI.
+description: Use when creating a pull request: reads the PR template, auto-fills from git context and linked issue, confirms with the user, then creates via gh CLI.
 ---
 
 # /sdlc:create-pr
@@ -11,22 +11,22 @@ Create a well-structured GitHub pull request by reading the repo's PR template a
 
 ## Template Location
 
-Read `.github/PULL_REQUEST_TEMPLATE.md` relative to the project root on every invocation. This path is fixed -- do not search for it.
+Read `.github/PULL_REQUEST_TEMPLATE.md` relative to the project root on every invocation. This path is fixed; do not search for it.
 
 ## Core Pattern
 
-1. **Gather** -- Collect all inputs silently. Ask only when auto-derivation fails.
-2. **Draft** -- Fill every template section from the gathered context.
-3. **Confirm** -- Show the full draft. Wait for explicit approval. Iterate.
-4. **Create** -- Run `gh pr create` with `--body-file`. Report the URL.
+1. **Gather**: collect all inputs silently. Ask only when auto-derivation fails.
+2. **Draft**: fill every template section from the gathered context.
+3. **Confirm**: show the full draft. Wait for explicit approval. Iterate.
+4. **Create**: run `gh pr create` with `--body-file`. Report the URL.
 
 ## Step 1: Gather
 
 **Auto-derive (no user interaction):**
 
 - Read `.github/PULL_REQUEST_TEMPLATE.md`
-- Run `git diff <base>...HEAD` -- the branch diff
-- Run `git log <base>..HEAD --oneline` -- the commit history
+- Run `git diff <base>...HEAD`, the branch diff
+- Run `git log <base>..HEAD --oneline`, the commit history
 - Extract issue number from branch name (pattern: `type/NNN-description`, e.g., `feat/17-add-skill` → `#17`)
 - If issue number found, run `gh issue view NNN --json title,body,labels` and extract acceptance criteria from the body
 
@@ -36,7 +36,7 @@ Read `.github/PULL_REQUEST_TEMPLATE.md` relative to the project root on every in
 |----------|------|---------|
 | "Which issue does this PR close?" | Branch name has no issue number | List of recent open issues (via `gh issue list --state open --limit 5 --json number,title`) + "None" + Other |
 | "PR type?" | Always; pre-select "Ready for review" | "Ready for review" / "Draft" |
-| "Base branch?" | Always; **must be asked even when auto-detected** -- the auto-detected value is the pre-selected default, not a reason to skip | Branch we branched from (auto-detected via `git merge-base` against known remote branches; pre-selected as default) / `develop` (if present in remote) / `main` / Other |
+| "Base branch?" | Always; **must be asked even when auto-detected**: the auto-detected value is the pre-selected default, not a reason to skip | Branch we branched from (auto-detected via `git merge-base` against known remote branches; pre-selected as default) / `develop` (if present in remote) / `main` / Other |
 | "Who should review this PR?" | Always; multi-select | All reviewers returned by script (see below), in order, plus "Other" as the last option |
 | "Who should this PR be assigned to?" | Always; pre-select "Me" | "Me" (resolved via `gh api user --jq '.login'`) / "Nobody" (default if "Me" feels presumptuous) / Other |
 | "Which checklist items have you completed?" | Always; multi-select; zero selections is valid (means none completed yet) | "Self-reviewed my own diff" / "Tests added or updated" / "Docs updated (if applicable)" / "No unrelated changes bundled in" |
@@ -44,7 +44,7 @@ Read `.github/PULL_REQUEST_TEMPLATE.md` relative to the project root on every in
 
 ### Helper scripts
 
-**IMPORTANT:** Do NOT run `bash .claude/skills/create-pr/*.sh` directly -- that path only works for project-local installs. Always use the commands below, which resolve the script location first.
+**IMPORTANT:** Do NOT run `bash .claude/skills/create-pr/*.sh` directly; that path only works for project-local installs. Always use the commands below, which resolve the script location first.
 
 Auto-detect base branch:
 
@@ -52,7 +52,7 @@ Auto-detect base branch:
 if [[ -f .claude/skills/create-pr/get-base-branch.sh ]]; then bash .claude/skills/create-pr/get-base-branch.sh; elif [[ -f "$HOME/.claude/skills/create-pr/get-base-branch.sh" ]]; then bash "$HOME/.claude/skills/create-pr/get-base-branch.sh"; fi
 ```
 
-It outputs the branch name (e.g., `main`, `develop`) whose merge-base with HEAD is most recent -- i.e., the branch we most likely forked from. Present it as the pre-selected default in the base branch question.
+It outputs the branch name (e.g., `main`, `develop`) whose merge-base with HEAD is most recent (i.e., the branch we most likely forked from). Present it as the pre-selected default in the base branch question.
 
 Fetch recent reviewers:
 
@@ -60,7 +60,7 @@ Fetch recent reviewers:
 if [[ -f .claude/skills/create-pr/get-reviewers.sh ]]; then bash .claude/skills/create-pr/get-reviewers.sh; elif [[ -f "$HOME/.claude/skills/create-pr/get-reviewers.sh" ]]; then bash "$HOME/.claude/skills/create-pr/get-reviewers.sh"; fi
 ```
 
-It outputs up to 4 reviewer logins, one per line, ordered most-recent-first (excludes the current user; falls back to alphabetical collaborators for new repos). Show every login the script returns as an option, in the exact order returned. Add "Other" as the last option. Do not add a "Skip" or "None" option -- if the user wants no reviewers, they select only "Other" and leave it empty.
+It outputs up to 4 reviewer logins, one per line, ordered most-recent-first (excludes the current user; falls back to alphabetical collaborators for new repos). Show every login the script returns as an option, in the exact order returned. Add "Other" as the last option. Do not add a "Skip" or "None" option; if the user wants no reviewers, they select only "Other" and leave it empty.
 
 Do not add labels to the PR. Labels are managed separately.
 
@@ -173,29 +173,29 @@ After reporting the PR URL: if the user selected "Yes" for screenshots in Step 1
 
 ### Branch is behind base
 Present options:
-1. **Continue as-is** -- create the PR and note it's behind
-2. **Rebase onto base** -- run `git rebase <base>`; if conflicts, help resolve
-3. **Merge base in** -- run `git merge <base>`; if conflicts, help resolve
-4. **Abort** -- stop; do not create the PR
+1. **Continue as-is**: create the PR and note it's behind
+2. **Rebase onto base**: run `git rebase <base>`; if conflicts, help resolve
+3. **Merge base in**: run `git merge <base>`; if conflicts, help resolve
+4. **Abort**: stop; do not create the PR
 
 ### No commits ahead of base
 Stop. "No commits ahead of `<base>`. Nothing to create a PR from."
 
 ## Common Mistakes
 
-- **Reconstructing the template from memory** -- read `.github/PULL_REQUEST_TEMPLATE.md` every time.
-- **Generating an ad-hoc format** -- every section from the template must appear, in template order.
-- **Creating before confirmation** -- never run `gh pr create` without explicit user approval.
-- **Leaving HTML comments** -- strip all `<!-- ... -->` from the output.
-- **Silently omitting `Closes #`** -- if no issue, say so explicitly on the first line.
-- **Deleting empty sections** -- Breaking changes and Screenshots are always present; use `None.`
-- **Ignoring AC divergence** -- note explicitly when PR criteria differ from the issue's.
-- **Skipping the base-branch question** -- always present it. Auto-detection provides the default, not the answer.
+- **Reconstructing the template from memory**: read `.github/PULL_REQUEST_TEMPLATE.md` every time.
+- **Generating an ad-hoc format**: every section from the template must appear, in template order.
+- **Creating before confirmation**: never run `gh pr create` without explicit user approval.
+- **Leaving HTML comments**: strip all `<!-- ... -->` from the output.
+- **Silently omitting `Closes #`**: if no issue, say so explicitly on the first line.
+- **Deleting empty sections**: Breaking changes and Screenshots are always present; use `None.`
+- **Ignoring AC divergence**: note explicitly when PR criteria differ from the issue's.
+- **Skipping the base-branch question**: always present it. Auto-detection provides the default, not the answer.
 
 ## Installation
 
-This skill includes helper scripts alongside `SKILL.md`. When installing or updating, copy (or symlink) the **entire `create-pr/` directory** -- not just `SKILL.md`. All files in this directory are required:
+This skill includes helper scripts alongside `SKILL.md`. When installing or updating, copy (or symlink) the **entire `create-pr/` directory**, not just `SKILL.md`. All files in this directory are required:
 
-- `SKILL.md` -- skill definition
-- `get-base-branch.sh` -- auto-detects the base branch
-- `get-reviewers.sh` -- fetches recent reviewer logins
+- `SKILL.md`: skill definition
+- `get-base-branch.sh`: auto-detects the base branch
+- `get-reviewers.sh`: fetches recent reviewer logins

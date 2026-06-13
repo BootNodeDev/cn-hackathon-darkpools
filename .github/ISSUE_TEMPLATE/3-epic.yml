@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Epics capture the vision and scope of a significant effort. They get decomposed into smaller, independently deliverable issues. Invest time here — the quality of the epic sets the ceiling for everything downstream.
+        Epics capture the vision and scope of a significant effort. They get decomposed into smaller, independently deliverable issues. Invest time here. The quality of the epic sets the ceiling for everything downstream.
 
   - type: markdown
     attributes:
@@ -19,10 +19,10 @@ body:
       label: Priority
       description: How urgently does this need to be addressed?
       options:
-        - Critical — blocking work, system down, or security issue
-        - High — must be addressed in current sprint
-        - Medium — should be addressed soon
-        - Low — nice to have, can wait
+        - Critical: blocking work, system down, or security issue
+        - High: must be addressed in current sprint
+        - Medium: should be addressed soon
+        - Low: nice to have, can wait
     validations:
       required: false
 
@@ -78,7 +78,7 @@ body:
     id: issues
     attributes:
       label: Issue breakdown
-      description: Checklist of sub-issues that compose this epic. Can start as a rough draft — the agent or the team will refine and create the actual issues.
+      description: Checklist of sub-issues that compose this epic. Can start as a rough draft; the agent or the team will refine and create the actual issues.
       placeholder: |
         - [ ] #issue or description
         - [ ] #issue or description

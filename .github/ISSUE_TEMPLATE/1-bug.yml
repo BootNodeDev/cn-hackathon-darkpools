@@ -74,10 +74,10 @@ body:
       label: Priority
       description: How urgently does this need to be addressed?
       options:
-        - Critical — blocking work, system down, or security issue
-        - High — must be addressed in current sprint
-        - Medium — should be addressed soon
-        - Low — nice to have, can wait
+        - Critical: blocking work, system down, or security issue
+        - High: must be addressed in current sprint
+        - Medium: should be addressed soon
+        - Low: nice to have, can wait
     validations:
       required: false
 
