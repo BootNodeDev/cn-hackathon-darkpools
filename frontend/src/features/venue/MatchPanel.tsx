@@ -39,9 +39,9 @@ export const MatchPanel = ({ pool }: { pool: Pool }): JSX.Element => {
     <section className="rounded-2xl border border-border bg-surface p-5 shadow-[0_0_40px_-12px_var(--color-primary)]">
       <h2 className="font-display text-base font-semibold text-foreground">Matching pass</h2>
       <p className="mt-1 text-xs text-muted-foreground">
-        The venue scans the {pool.baseLabel}/{pool.quoteLabel} book and settles every crossing pair
-        at the midpoint. Pairs and quantities are picked on-ledger; the operator only triggers the
-        pass.
+        The venue scans the {pool.baseLabel}/{pool.quoteLabel} book off-chain and picks crossing
+        pairs by price-time priority. Each pair is submitted for on-ledger settlement, where the
+        contract sets the midpoint price and either moves both legs atomically or rejects the match.
       </p>
 
       <button
