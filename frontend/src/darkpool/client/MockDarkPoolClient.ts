@@ -14,10 +14,13 @@ import type {
   Fill,
   MatchResult,
   Order,
+  PassResult,
   PlaceOrderRequest,
   Pool,
   Trade,
 } from '../types'
+
+const SIM_INTERVAL_MS = 3000
 
 export class MockDarkPoolClient implements DarkPoolClient {
   private pools: Pool[] = POOLS
@@ -208,6 +211,37 @@ export class MockDarkPoolClient implements DarkPoolClient {
     this.orders = this.orders.filter((x) => x.orderId !== orderId)
     this.notify()
     return Promise.resolve()
+  }
+
+  async runMatchPass(): Promise<PassResult> {
+    let matched = 0
+    let rejected = 0
+    for (const pool of this.pools) {
+      const book = this.orders.filter((o) => o.poolId === pool.poolId)
+      const buys = book.filter((o) => o.side === 'Buy').sort((a, b) => b.limitPrice - a.limitPrice)
+      const sells = book
+        .filter((o) => o.side === 'Sell')
+        .sort((a, b) => a.limitPrice - b.limitPrice)
+      const usedSells = new Set<string>()
+      for (const buy of buys) {
+        const sell = sells.find(
+          (s) =>
+            !usedSells.has(s.orderId) &&
+            s.trader !== buy.trader &&
+            crosses(buy.limitPrice, s.limitPrice),
+        )
+        if (!sell) continue
+        usedSells.add(sell.orderId)
+        try {
+          await this.matchOrders(buy.orderId, sell.orderId)
+          matched += 1
+        } catch {
+          rejected += 1
+        }
+      }
+    }
+    const ranAt = this.clock()
+    return { ranAt, matched, rejected, nextRunAt: ranAt + SIM_INTERVAL_MS }
   }
 
   matchOrders(buyOrderId: string, sellOrderId: string): Promise<MatchResult> {

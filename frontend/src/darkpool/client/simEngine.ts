@@ -1,4 +1,3 @@
-import { crosses } from '../darkpoolMath'
 import { COUNTERPARTIES, POOL_MIDS, POOLS } from '../seed'
 import type { MockDarkPoolClient } from './MockDarkPoolClient'
 
@@ -32,16 +31,7 @@ export const startSimEngine = (client: MockDarkPoolClient): (() => void) => {
       })
       .catch(() => {})
 
-    const book = client.listBook(pool.poolId)
-    const buys = book.filter((o) => o.side === 'Buy').sort((a, b) => b.limitPrice - a.limitPrice)
-    const sells = book.filter((o) => o.side === 'Sell').sort((a, b) => a.limitPrice - b.limitPrice)
-    for (const b of buys) {
-      const s = sells.find((x) => x.trader !== b.trader && crosses(b.limitPrice, x.limitPrice))
-      if (s) {
-        client.matchOrders(b.orderId, s.orderId).catch(() => {})
-        break
-      }
-    }
+    client.runMatchPass().catch(() => {})
   }
 
   const handle = setInterval(tick, 3000)

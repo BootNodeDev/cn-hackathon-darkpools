@@ -5,39 +5,18 @@ import { formatPrice, formatQty, formatTime } from '@/darkpool/format'
 import { useBook, useTrades } from '@/darkpool/hooks'
 import type { Order, Pool } from '@/darkpool/types'
 
-const Row = ({
-  order,
-  selected,
-  onSelect,
-}: {
-  order: Order
-  selected: boolean
-  onSelect: (o: Order) => void
-}): JSX.Element => (
+const Row = ({ order }: { order: Order }): JSX.Element => (
   <motion.tr
     layout
     initial={{ opacity: 0 }}
     animate={{ opacity: 1 }}
     exit={{ opacity: 0 }}
-    tabIndex={0}
-    aria-selected={selected}
-    onClick={() => onSelect(order)}
-    onKeyDown={(e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault()
-        onSelect(order)
-      }
-    }}
-    className={`cursor-pointer border-border/60 border-b text-sm transition last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
-      selected ? 'bg-primary/10' : 'hover:bg-muted'
-    }`}
+    className="border-border/60 border-b text-sm last:border-b-0"
   >
     <td className="px-5 py-2.5">
       <SideTag side={order.side} iconOnly />
     </td>
-    <td className={`px-5 py-2.5 font-mono ${selected ? 'text-primary' : ''}`}>
-      {formatPrice(order.limitPrice)}
-    </td>
+    <td className="px-5 py-2.5 font-mono">{formatPrice(order.limitPrice)}</td>
     <td className="px-5 py-2.5 font-mono">{formatQty(order.quantity)}</td>
     <td className="px-5 py-2.5 font-mono text-soft">{formatQty(order.minFill)}</td>
     <td className="px-5 py-2.5">
@@ -47,23 +26,12 @@ const Row = ({
   </motion.tr>
 )
 
-export const FullBook = ({
-  pool,
-  selectedBuyId,
-  selectedSellId,
-  onSelect,
-}: {
-  pool: Pool
-  selectedBuyId: string | null
-  selectedSellId: string | null
-  onSelect: (order: Order) => void
-}): JSX.Element => {
+export const FullBook = ({ pool }: { pool: Pool }): JSX.Element => {
   const book = useBook(pool.poolId)
   const mid = useTrades(pool.poolId)[0]?.price ?? null
   // asks (sells) high->low on top, then the gold midpoint band, then bids (buys)
   const sells = book.filter((o) => o.side === 'Sell').sort((a, b) => b.limitPrice - a.limitPrice)
   const buys = book.filter((o) => o.side === 'Buy').sort((a, b) => b.limitPrice - a.limitPrice)
-  const sel = (o: Order): boolean => o.orderId === selectedBuyId || o.orderId === selectedSellId
 
   return (
     <section className="overflow-hidden rounded-2xl border border-border bg-surface">
@@ -71,7 +39,7 @@ export const FullBook = ({
         <span className="font-display text-base font-semibold text-foreground">
           Full book · current
         </span>
-        <span className="text-xs text-soft">venue sees every resting order · click to select</span>
+        <span className="text-xs text-soft">venue sees every resting order</span>
       </div>
       {book.length === 0 ? (
         <p className="px-5 py-8 text-center text-sm text-muted-foreground">Book is empty</p>
@@ -102,7 +70,7 @@ export const FullBook = ({
           <tbody>
             <AnimatePresence initial={false}>
               {sells.map((o) => (
-                <Row key={o.orderId} order={o} selected={sel(o)} onSelect={onSelect} />
+                <Row key={o.orderId} order={o} />
               ))}
             </AnimatePresence>
             <tr>
@@ -119,7 +87,7 @@ export const FullBook = ({
             </tr>
             <AnimatePresence initial={false}>
               {buys.map((o) => (
-                <Row key={o.orderId} order={o} selected={sel(o)} onSelect={onSelect} />
+                <Row key={o.orderId} order={o} />
               ))}
             </AnimatePresence>
           </tbody>

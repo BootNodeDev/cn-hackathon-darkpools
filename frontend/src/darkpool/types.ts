@@ -70,6 +70,13 @@ export interface MatchResult {
   sellRemainder: Order | null
 }
 
+export interface PassResult {
+  ranAt: number
+  matched: number
+  rejected: number
+  nextRunAt: number
+}
+
 export interface DarkPoolClient {
   listPools(): Pool[]
   getBalances(party: string): Balance[]
@@ -78,7 +85,7 @@ export interface DarkPoolClient {
   listMyOrders(party: string): Order[]
   listMyFills(party: string): Fill[]
   listBook(poolId: string): Order[]
-  matchOrders(buyOrderId: string, sellOrderId: string): Promise<MatchResult>
+  runMatchPass(): Promise<PassResult>
   listTrades(poolId: string): Trade[]
   subscribe(listener: () => void): () => void
 }
