@@ -48,7 +48,7 @@ const OrderRow = ({
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, height: 0 }}
-      className="border-border/60 border-b text-sm last:border-b-0"
+      className="h-11 border-border/60 border-b text-sm last:border-b-0"
     >
       <td className="px-5 py-2.5">
         <SideTag side={order.side} />
@@ -98,34 +98,36 @@ export const MyOpenOrders = ({ pool, party }: { pool: Pool; party: string }): JS
           No open orders
         </p>
       ) : (
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-border text-left text-[0.65rem] uppercase tracking-wider text-soft">
-              <th scope="col" className="px-5 py-2 font-semibold">
-                Side
-              </th>
-              <th scope="col" className="px-5 py-2 font-semibold">
-                Limit
-              </th>
-              <th scope="col" className="px-5 py-2 font-semibold">
-                Quantity
-              </th>
-              <th scope="col" className="px-5 py-2 font-semibold">
-                Expires
-              </th>
-              <th scope="col" className="px-5 py-2 text-right font-semibold">
-                <span className="sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <AnimatePresence initial={false}>
-              {orders.map((o) => (
-                <OrderRow key={o.orderId} order={o} pool={pool} party={party} />
-              ))}
-            </AnimatePresence>
-          </tbody>
-        </table>
+        <div className="max-h-[260px] overflow-y-auto">
+          <table className="w-full">
+            <thead className="sticky top-0 z-10 bg-surface">
+              <tr className="h-9 border-b border-border text-left text-[0.65rem] uppercase tracking-wider text-soft">
+                <th scope="col" className="px-5 py-2 font-semibold">
+                  Side
+                </th>
+                <th scope="col" className="px-5 py-2 font-semibold">
+                  Limit
+                </th>
+                <th scope="col" className="px-5 py-2 font-semibold">
+                  Quantity
+                </th>
+                <th scope="col" className="px-5 py-2 font-semibold">
+                  Expires
+                </th>
+                <th scope="col" className="px-5 py-2 text-right font-semibold">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <AnimatePresence initial={false}>
+                {orders.map((o) => (
+                  <OrderRow key={o.orderId} order={o} pool={pool} party={party} />
+                ))}
+              </AnimatePresence>
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   )
