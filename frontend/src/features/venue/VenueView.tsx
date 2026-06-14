@@ -36,12 +36,14 @@ export const VenueView = (): JSX.Element => {
         </span>
       </div>
 
-      <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[1.5fr_1fr]">
-        <FullBook pool={pool} />
+      <div className="grid grid-cols-1 items-start gap-3.5 lg:grid-cols-[340px_1fr]">
         <MatchPanel pool={pool} />
-      </div>
 
-      <SettledMatches pool={pool} />
+        <div className="flex flex-col gap-3.5">
+          <FullBook pool={pool} />
+          <SettledMatches pool={pool} />
+        </div>
+      </div>
     </div>
   )
 }
