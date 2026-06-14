@@ -39,7 +39,7 @@ export const MatchPanel = ({ pool }: { pool: Pool }): JSX.Element => {
   return (
     <section
       data-testid="match-panel"
-      className="rounded-2xl border border-border bg-surface p-5 shadow-[0_0_40px_-12px_var(--color-primary)]"
+      className="rounded-2xl border border-border border-l-2 border-l-primary bg-surface p-5"
     >
       <div className="flex items-center gap-2">
         <h2 className="font-display text-base font-semibold text-foreground">Matching pass</h2>
