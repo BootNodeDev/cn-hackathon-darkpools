@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { Select } from '@/components/ui/Select'
 import { usePools } from '@/darkpool/hooks'
-import { VenueStats } from './VenueStats'
+import { FullBook } from './FullBook'
+import { MatchPanel } from './MatchPanel'
+import { SettledMatches } from './SettledMatches'
 
 export const VenueView = (): JSX.Element => {
   const pools = usePools()
@@ -11,7 +13,7 @@ export const VenueView = (): JSX.Element => {
   if (!pool) return <div className="py-10 text-center text-muted-foreground">Loading…</div>
 
   return (
-    <div data-testid="venue-view" data-pool-id={pool.poolId} className="flex flex-col gap-6">
+    <div data-testid="venue-view" data-pool-id={pool.poolId} className="flex flex-col gap-3.5">
       <h1 className="sr-only">Venue - CN Dark Pools</h1>
       <div className="flex items-center justify-between">
         <div className="min-w-44" data-testid="pool-select">
@@ -34,7 +36,12 @@ export const VenueView = (): JSX.Element => {
         </span>
       </div>
 
-      <VenueStats pool={pool} />
+      <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[1.5fr_1fr]">
+        <FullBook pool={pool} />
+        <MatchPanel pool={pool} />
+      </div>
+
+      <SettledMatches pool={pool} />
     </div>
   )
 }
