@@ -30,9 +30,9 @@ the backend with `npm run backend:up`.
 
 ## The two views
 
-- **`/`** is the trader's view. Pick a pair, check your balances, place a private
-  order (side, limit price, quantity, minimum fill, optional expiry), and watch
-  your open orders and fills.
+- **`/`** is the trader's view. Pick a pair, place a private order (side, limit
+  price, quantity, minimum fill, optional expiry), and watch your open orders
+  and fills.
 - **`/venue`** is the operator's view: the full resting book, the settled
   matches, and a **Run matching pass** button. The venue scans the book
   off-chain and picks crossing pairs; the contract sets the midpoint price and

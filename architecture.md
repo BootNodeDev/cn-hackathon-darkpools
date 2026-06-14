@@ -32,8 +32,8 @@ The frontend reads from the backend and renders; the backend serves the trader/v
 
 The frontend has two views, both backed by `DarkPoolClient`:
 
-- **Trader view** (`/`): place orders, watch own fills, check balances.
-- **Venue view** (`/venue`): full resting book, manual match trigger, schedule controls.
+- **Trader view** (`/`): place orders, watch own open orders and fills.
+- **Venue view** (`/venue`): full resting book, manual match trigger, settled matches.
 
 The backend mirrors this with two read paths:
 
