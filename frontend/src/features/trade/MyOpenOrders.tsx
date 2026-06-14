@@ -42,6 +42,9 @@ const OrderRow = ({
   return (
     <motion.tr
       layout
+      data-testid="open-order-row"
+      data-order-id={order.orderId}
+      data-side={order.side}
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, height: 0 }}
@@ -54,11 +57,11 @@ const OrderRow = ({
       <td className="px-5 py-2.5 font-mono">
         {formatQty(order.quantity)} {pool.baseLabel}
       </td>
-      <td className="px-5 py-2.5 font-mono text-soft">{formatQty(order.minFill)}</td>
       <td className="px-5 py-2.5 font-mono text-soft">{expiryLabel(order.expiresAt)}</td>
       <td className="px-5 py-2.5 text-right">
         <button
           type="button"
+          data-testid="cancel-order-button"
           onClick={cancel}
           disabled={cancelling}
           className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted px-3 py-1.5 text-xs text-foreground transition hover:border-border-strong disabled:opacity-55"
@@ -74,15 +77,26 @@ export const MyOpenOrders = ({ pool, party }: { pool: Pool; party: string }): JS
   const orders = useMyOrders(party).filter((o) => o.poolId === pool.poolId)
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-border bg-surface">
+    <section
+      data-testid="open-orders"
+      className="overflow-hidden rounded-2xl border border-border bg-surface"
+    >
       <div className="flex items-center gap-2 border-b border-border px-5 py-3">
         <span className="font-display text-base font-semibold text-foreground">My open orders</span>
-        <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+        <span
+          data-testid="open-orders-count"
+          className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+        >
           {orders.length}
         </span>
       </div>
       {orders.length === 0 ? (
-        <p className="px-5 py-8 text-center text-sm text-muted-foreground">No open orders</p>
+        <p
+          data-testid="open-orders-empty"
+          className="px-5 py-8 text-center text-sm text-muted-foreground"
+        >
+          No open orders
+        </p>
       ) : (
         <table className="w-full">
           <thead>
@@ -95,9 +109,6 @@ export const MyOpenOrders = ({ pool, party }: { pool: Pool; party: string }): JS
               </th>
               <th scope="col" className="px-5 py-2 font-semibold">
                 Quantity
-              </th>
-              <th scope="col" className="px-5 py-2 font-semibold">
-                Min fill
               </th>
               <th scope="col" className="px-5 py-2 font-semibold">
                 Expires
