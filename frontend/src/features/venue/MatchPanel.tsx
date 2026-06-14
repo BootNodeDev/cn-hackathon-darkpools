@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Spinner } from '@/components/ui/Spinner'
+import { Tooltip } from '@/components/ui/Tooltip'
 import { toast } from '@/components/ui/toast'
 import { useDarkPoolActions } from '@/darkpool/hooks'
 import type { PassResult, Pool } from '@/darkpool/types'
@@ -40,7 +41,13 @@ export const MatchPanel = ({ pool }: { pool: Pool }): JSX.Element => {
       data-testid="match-panel"
       className="rounded-2xl border border-border bg-surface p-5 shadow-[0_0_40px_-12px_var(--color-primary)]"
     >
-      <h2 className="font-display text-base font-semibold text-foreground">Matching pass</h2>
+      <div className="flex items-center gap-2">
+        <h2 className="font-display text-base font-semibold text-foreground">Matching pass</h2>
+        <Tooltip
+          label="About the matching pass"
+          content="Each matched pair settles atomically — both legs move or neither does."
+        />
+      </div>
       <p className="mt-1 text-xs text-muted-foreground">
         The venue scans the {pool.baseLabel}/{pool.quoteLabel} book off-chain and picks crossing
         pairs by price-time priority. Each pair is submitted for on-ledger settlement, where the
@@ -85,10 +92,6 @@ export const MatchPanel = ({ pool }: { pool: Pool }): JSX.Element => {
           </div>
         </dl>
       )}
-
-      <p className="mt-3 text-center text-xs text-soft">
-        Each matched pair settles atomically — both legs move or neither does.
-      </p>
     </section>
   )
 }

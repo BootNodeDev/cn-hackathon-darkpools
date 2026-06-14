@@ -14,7 +14,7 @@ export const MarketBar = ({
     <section
       data-testid="market-bar"
       data-pool-id={pool.poolId}
-      className="flex flex-wrap items-center gap-x-8 gap-y-3 border-border border-b pb-4"
+      className="flex flex-wrap items-center gap-x-8 gap-y-3"
     >
       <div className="min-w-44" data-testid="pool-select">
         <Select

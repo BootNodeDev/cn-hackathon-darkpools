@@ -23,12 +23,12 @@ export const MyFills = ({ pool, party }: { pool: Pool; party: string }): JSX.Ele
       {fills.length === 0 ? (
         <p
           data-testid="my-fills-empty"
-          className="px-5 py-8 text-center text-sm text-muted-foreground"
+          className="flex h-[260px] items-center justify-center px-5 text-center text-sm text-muted-foreground"
         >
           No fills yet
         </p>
       ) : (
-        <div className="max-h-[260px] overflow-y-auto">
+        <div className="h-[260px] overflow-y-auto">
           <table className="w-full">
             <thead className="sticky top-0 z-10 bg-surface">
               <tr className="h-9 border-b border-border text-left text-[0.65rem] uppercase tracking-wider text-soft">

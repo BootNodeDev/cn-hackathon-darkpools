@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { TraderChip } from '@/components/TraderChip'
+import { Tooltip } from '@/components/ui/Tooltip'
 import { formatPrice, formatQty, formatTime } from '@/darkpool/format'
 import { useTrades } from '@/darkpool/hooks'
 import type { Pool } from '@/darkpool/types'
@@ -12,21 +13,21 @@ export const SettledMatches = ({ pool }: { pool: Pool }): JSX.Element => {
       data-testid="settled-matches"
       className="overflow-hidden rounded-xl border border-border bg-surface"
     >
-      <div className="flex items-center justify-between border-b border-border px-5 py-3">
+      <div className="flex items-center gap-2 border-b border-border px-5 py-3">
         <span className="font-display text-base font-semibold text-foreground">
           Settled matches
         </span>
-        <span className="text-xs text-soft">every match this venue cleared</span>
+        <Tooltip label="About settled matches" content="every match this venue cleared" />
       </div>
       {trades.length === 0 ? (
         <p
           data-testid="settled-matches-empty"
-          className="px-5 py-8 text-center text-sm text-muted-foreground"
+          className="flex h-[260px] items-center justify-center px-5 text-center text-sm text-muted-foreground"
         >
           No matches settled yet
         </p>
       ) : (
-        <div className="max-h-[260px] overflow-y-auto">
+        <div className="h-[260px] overflow-y-auto">
           <table className="w-full">
             <thead className="sticky top-0 z-10 bg-surface">
               <tr className="h-9 border-b border-border text-left text-[0.65rem] uppercase tracking-wider text-soft">
