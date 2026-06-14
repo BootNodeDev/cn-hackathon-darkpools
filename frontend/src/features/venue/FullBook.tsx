@@ -78,7 +78,7 @@ export const FullBook = ({ pool }: { pool: Pool }): JSX.Element => {
       {book.length === 0 ? (
         <p
           data-testid="full-book-empty"
-          className="px-5 py-8 text-center text-sm text-muted-foreground"
+          className="flex h-[502px] items-center justify-center px-5 text-center text-sm text-muted-foreground"
         >
           Book is empty
         </p>
