@@ -89,6 +89,33 @@ describe('ledger command builders', () => {
     assert.equal(args.sellFunding.allocationFactoryCid, 'factory-cid')
   })
 
+  // Scenario: Carpincho submits the frontend-built match command directly to
+  // Canton. Token-standard TextMap fields must therefore use JSON object shape,
+  // otherwise the participant rejects the transaction before contract logic runs.
+  test('matchCommand serializes empty token-standard extra args as objects', () => {
+    const command = matchCommand({
+      poolCid: 'pool-cid',
+      factoryCid: 'factory-cid',
+      plan: {
+        poolId: 'TTA-TTB',
+        buyOrderCid: 'buy-cid',
+        sellOrderCid: 'sell-cid',
+        fillQty: '10.0000000000',
+      },
+      nowMs: 1_700_000_000_000,
+    })
+    const args = command.ExerciseCommand.choiceArgument
+
+    // Empty maps remain maps: Canton decodes TextMap from JSON objects, not
+    // arrays, so every ExtraArgs path must expose `{}` for values.
+    assert.deepEqual(args.buyFunding, {
+      allocationFactoryCid: 'factory-cid',
+      allocateArgs: { context: { values: {} }, meta: { values: {} } },
+    })
+    assert.deepEqual(args.buyExecuteArgs, { context: { values: {} }, meta: { values: {} } })
+    assert.deepEqual(args.sellExecuteArgs, { context: { values: {} }, meta: { values: {} } })
+  })
+
   // Scenario: placement needs concrete RegistryHolding cids, not just balance
   // totals. The frontend reads ACS through the connected wallet and normalizes
   // participant-native active-contract rows.

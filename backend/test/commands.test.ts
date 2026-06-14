@@ -61,6 +61,36 @@ test('match passes the single factoryCid for both legs', () => {
   assert.equal(a.sellFunding.allocationFactoryCid, 'F')
 })
 
+// Scenario: token-standard ExtraArgs include TextMap fields. The JSON Ledger API
+// expects those maps as JSON objects, so empty maps must be `{}` rather than an
+// empty array that cannot decode as a Daml TextMap.
+test('match serializes empty token-standard extra args as objects', () => {
+  const c = match({
+    poolCid: 'P',
+    buyOrderCid: 'b',
+    sellOrderCid: 's',
+    matchId: 'm',
+    factoryCid: 'F',
+    requestedAt: 't0',
+    allocateBefore: 't1',
+    settleBefore: 't2',
+  })
+  const args = c.ExerciseCommand.choiceArgument as {
+    buyFunding: { allocateArgs: { context: { values: unknown }; meta: { values: unknown } } }
+    buyExecuteArgs: { context: { values: unknown }; meta: { values: unknown } }
+    sellExecuteArgs: { context: { values: unknown }; meta: { values: unknown } }
+  }
+
+  // Empty maps still need object shape because Canton decodes TextMap from a
+  // JSON object at submit time.
+  assert.deepEqual(args.buyFunding.allocateArgs.context.values, {})
+  assert.deepEqual(args.buyFunding.allocateArgs.meta.values, {})
+  assert.deepEqual(args.buyExecuteArgs.context.values, {})
+  assert.deepEqual(args.buyExecuteArgs.meta.values, {})
+  assert.deepEqual(args.sellExecuteArgs.context.values, {})
+  assert.deepEqual(args.sellExecuteArgs.meta.values, {})
+})
+
 // Scenario: the faucet mints through the deployed Registry template. The choice
 // argument must use the Daml record field names, including the full instrumentId
 // object, because production Registry.Mint does not accept legacy symbol/to

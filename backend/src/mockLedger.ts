@@ -259,6 +259,18 @@ export const createMockLedger = (config: BootstrapConfig): Ledger => {
     archived: false,
   })
 
+  // Seed the registry factory so wallet-formed match transactions can disclose it.
+  offset += 1
+  store.set(config.factoryCid, {
+    contractId: config.factoryCid,
+    templateId: TEMPLATE_IDS.registry,
+    createArgument: {
+      admin: config.parties.admin,
+    },
+    createdOffset: offset,
+    archived: false,
+  })
+
   return {
     ledgerEnd: async () => offset,
     activeContracts: async (_readAs, templateId) =>

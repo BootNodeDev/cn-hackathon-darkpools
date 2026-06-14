@@ -5,6 +5,7 @@ import {
   fetchDarkPoolConfig,
   fetchMatchPlan,
   HttpDarkPoolClient,
+  syncMatchExecution,
 } from '@/darkpool/client/HttpDarkPoolClient'
 import { useDarkPoolClient } from '@/darkpool/DarkPoolProvider'
 import {
@@ -25,6 +26,7 @@ import type {
   Pool,
   Trade,
 } from '@/darkpool/types'
+import { completionOffsetOf } from '@/darkpool/walletExecution'
 
 const useSnapshot = <T>(read: (client: DarkPoolClient) => T): T => {
   const client = useDarkPoolClient()
@@ -204,11 +206,13 @@ export const useDarkPoolActions = (): DarkPoolActions => {
         return client.runMatchPass()
       }
       const [config, planned] = await Promise.all([fetchDarkPoolConfig(), fetchMatchPlan()])
+      const matchDisclosures = [...config.disclosedContracts, ...planned.disclosedContracts]
+      let syncOffset = planned.syncOffset
       let matched = 0
       let rejected = 0
       for (const plan of planned.plans) {
         try {
-          await execute({
+          const result = await execute({
             commandId: commandId('match'),
             commands: [
               matchCommand({
@@ -220,9 +224,15 @@ export const useDarkPoolActions = (): DarkPoolActions => {
             ],
             actAs: [config.parties.venue],
             readAs: [config.parties.venue],
-            disclosedContracts: config.disclosedContracts,
-            synchronizerId: config.disclosedContracts[0]?.synchronizerId,
+            disclosedContracts: matchDisclosures,
+            synchronizerId: matchDisclosures[0]?.synchronizerId,
           })
+          const completionOffset = completionOffsetOf(result)
+          if (completionOffset === undefined) {
+            throw new Error('wallet execution did not return a completion offset')
+          }
+          await syncMatchExecution({ beginExclusive: syncOffset, endInclusive: completionOffset })
+          syncOffset = completionOffset
           matched += 1
         } catch {
           rejected += 1

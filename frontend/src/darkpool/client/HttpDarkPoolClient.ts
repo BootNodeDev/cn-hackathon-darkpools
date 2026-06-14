@@ -115,7 +115,14 @@ export interface TradeState {
 
 export interface MatchPlanResponse {
   ranAt: number
+  syncOffset: number
   plans: MatchPlan[]
+  disclosedContracts: DisclosedContract[]
+}
+
+export interface MatchSyncRequest {
+  beginExclusive: number
+  endInclusive: number
 }
 
 export const darkPoolQueryConfig = {
@@ -251,6 +258,14 @@ export const fetchDarkPoolConfig = async (): Promise<DarkPoolLedgerConfig> =>
 // Fetches unsigned venue match plans; Carpincho executes the actual match command.
 export const fetchMatchPlan = async (): Promise<MatchPlanResponse> =>
   requestJson<MatchPlanResponse>('/venue/match-plan', { method: 'POST', body: '{}' })
+
+// Syncs wallet-signed match effects into the backend read projection.
+export const syncMatchExecution = async (request: MatchSyncRequest): Promise<void> => {
+  await requestJson('/venue/match-sync', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  })
+}
 
 // Polling read client that keeps the existing synchronous DarkPoolClient API.
 export class HttpDarkPoolClient implements DarkPoolClient {

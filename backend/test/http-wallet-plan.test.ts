@@ -33,10 +33,10 @@ const post = (base: string, path: string, body: unknown): Promise<Response> =>
   })
 
 describe('wallet transaction planning endpoints', () => {
-  // Scenario: the frontend cannot fetch the venue-signed DarkPool contract as a
-  // trader, so the backend exposes the deployed ids and disclosure required to
-  // exercise DarkPool_PlaceOrder through Carpincho.
-  test('GET /config returns ids, template ids, and the pool disclosure', async () => {
+  // Scenario: the frontend cannot fetch the venue-signed DarkPool contract or
+  // the admin-signed registry factory from the wallet participant. The backend
+  // exposes both disclosures so Carpincho can prepare match transactions.
+  test('GET /config returns ids, template ids, and required disclosures', async () => {
     const app = await startApp()
     try {
       // The config endpoint is read-only metadata. The frontend uses these
@@ -51,13 +51,20 @@ describe('wallet transaction planning endpoints', () => {
       assert.equal(body.factoryCid, 'mock-registry-rules-cid')
       assert.equal(body.templateIds.darkPool, '#dark-pool:DarkPool:DarkPool')
 
-      // The disclosed contract shape mirrors Canton JSON API v2 so it can be
-      // forwarded directly in useExecute().execute({ disclosedContracts }).
+      // The disclosed contract shape mirrors Canton JSON API v2. The pool lets
+      // the trader/venue exercise DarkPool choices, and the factory lets the
+      // match transaction exercise the token-standard allocation interface.
       assert.deepEqual(body.disclosedContracts, [
         {
           templateId: '#dark-pool:DarkPool:DarkPool',
           contractId: 'mock-pool-cid',
           createdEventBlob: 'mock-pool-cid-created-event-blob',
+          synchronizerId: 'mock-synchronizer',
+        },
+        {
+          templateId: '#registry-token:RegistryToken.Registry:Registry',
+          contractId: 'mock-registry-rules-cid',
+          createdEventBlob: 'mock-registry-rules-cid-created-event-blob',
           synchronizerId: 'mock-synchronizer',
         },
       ])
@@ -110,6 +117,22 @@ describe('wallet transaction planning endpoints', () => {
         sellOrderCid: sell.order.cid,
         fillQty: '10.0000000000',
       })
+      assert.deepEqual(
+        body.disclosedContracts.map((contract: { templateId: string; contractId: string }) => ({
+          templateId: contract.templateId,
+          contractId: contract.contractId,
+        })),
+        [
+          {
+            templateId: '#registry-token:RegistryToken.Holding:RegistryHolding',
+            contractId: 'RegistryHolding-1',
+          },
+          {
+            templateId: '#registry-token:RegistryToken.Holding:RegistryHolding',
+            contractId: 'RegistryHolding-2',
+          },
+        ],
+      )
 
       // Because this endpoint only plans, both orders should still be resting in
       // the venue book after the response.

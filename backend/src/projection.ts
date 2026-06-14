@@ -101,12 +101,14 @@ export interface Projection {
   refresh: () => Promise<void>
   pools: () => Pool[]
   openOrders: () => OrderContract[]
+  knownOrders: () => OrderContract[]
   holdings: () => Holding[]
   trades: () => Trade[]
   recordTrade: (trade: Trade) => void
 }
 
 export const createProjection = (ledger: Ledger, config: BootstrapConfig): Projection => {
+  const knownOrders = new Map<string, OrderContract>()
   const state: { pools: Pool[]; orders: OrderContract[]; holdings: Holding[]; trades: Trade[] } = {
     pools: [],
     orders: [],
@@ -120,12 +122,17 @@ export const createProjection = (ledger: Ledger, config: BootstrapConfig): Proje
         ledger.activeContracts(config.parties.venue, TEMPLATE_IDS.order),
         ledger.activeContracts(config.parties.admin, TEMPLATE_IDS.registryHolding),
       ])
+      const parsedOrders = orders.map(parseOrder)
+      for (const order of parsedOrders) {
+        knownOrders.set(order.contractId, order)
+      }
       state.pools = pools.map(parsePool)
-      state.orders = orders.map(parseOrder)
+      state.orders = parsedOrders
       state.holdings = holdings.map(parseHolding)
     },
     pools: () => state.pools,
     openOrders: () => state.orders,
+    knownOrders: () => [...knownOrders.values()],
     holdings: () => state.holdings,
     trades: () => state.trades,
     recordTrade: (trade) => {

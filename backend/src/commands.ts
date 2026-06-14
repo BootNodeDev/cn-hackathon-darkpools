@@ -3,9 +3,8 @@
 import { TEMPLATE_IDS } from './templateIds.ts'
 import type { InstrumentId, Side } from './types.ts'
 
-// Empty token-standard ExtraArgs; reconcile the exact JSON against
-// splice-api-token-metadata-v1 at the first integration run.
-const emptyExtraArgs = { context: { values: [] }, meta: { values: [] } }
+// Empty token-standard ExtraArgs use TextMap object shape for JSON Ledger API decoding.
+const emptyExtraArgs = { context: { values: {} }, meta: { values: {} } }
 
 export interface ExerciseCommand {
   ExerciseCommand: {

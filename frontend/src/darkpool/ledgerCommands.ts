@@ -100,8 +100,8 @@ const matchIdOf = (buyOrderCid: string, sellOrderCid: string): string => {
 
 // Builds the token-standard empty ExtraArgs record expected by the registry choices.
 const emptyExtraArgs = (): Record<string, unknown> => ({
-  context: { values: [] },
-  meta: { values: [] },
+  context: { values: {} },
+  meta: { values: {} },
 })
 
 // Builds the DarkPool_PlaceOrder command signed by the connected trader.

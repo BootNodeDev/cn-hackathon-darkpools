@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { once } from 'node:events'
 import type { AddressInfo } from 'node:net'
 import { test } from 'node:test'
+import { match } from '../../src/commands.ts'
 import { loadConfig } from '../../src/config.ts'
 import { createApp } from '../../src/http.ts'
 import type { Balance } from '../../src/types.ts'
@@ -20,6 +21,8 @@ const startApp = async () => {
   const { port } = server.address() as AddressInfo
   return {
     base: `http://127.0.0.1:${port}`,
+    config,
+    ctx,
     parties: config.parties.traders,
     close: async () => {
       ctx.scheduler.stop()
@@ -80,6 +83,83 @@ test('place a crossing buy/sell, match settles at the midpoint and moves balance
     assert.equal(total(aliceView.balances, 'TTA'), '10.0000000000')
     assert.equal(total(aliceView.balances, 'TTB'), '85.0000000000')
 
+    const venue = await (await fetch(`${app.base}/venue`)).json()
+    assert.equal(venue.pools['TTA-TTB'].trades.length, 1)
+    assert.equal(venue.pools['TTA-TTB'].book.length, 0)
+  } finally {
+    await app.close()
+  }
+})
+
+test('syncs a wallet-signed match into venue trades and trader fills', async () => {
+  const app = await startApp()
+  const { alice, bob } = app.parties
+  try {
+    // Alice funds the buy in quote token and Bob funds the sell in base token,
+    // matching the same order data that the venue wallet will later sign.
+    await post(app.base, '/faucet', { party: alice, instrument: 'TTB', amount: '100.0' })
+    await post(app.base, '/faucet', { party: bob, instrument: 'TTA', amount: '100.0' })
+    await post(app.base, '/orders', {
+      party: alice,
+      poolId: 'TTA-TTB',
+      side: 'Buy',
+      quantity: '10.0',
+      limitPrice: '2.0',
+      minFill: '1.0',
+    })
+    await post(app.base, '/orders', {
+      party: bob,
+      poolId: 'TTA-TTB',
+      side: 'Sell',
+      quantity: '10.0',
+      limitPrice: '1.0',
+      minFill: '1.0',
+    })
+
+    // Carpincho signs outside the backend scheduler, so the ledger changes but
+    // the backend has not yet recorded the authoritative MatchResult as a fill.
+    const beginExclusive = await app.ctx.ledger.ledgerEnd()
+    const buyOrder = app.ctx.projection.openOrders().find((order) => order.side === 'Buy')
+    const sellOrder = app.ctx.projection.openOrders().find((order) => order.side === 'Sell')
+    assert.ok(buyOrder)
+    assert.ok(sellOrder)
+    await app.ctx.ledger.submit(app.config.parties.venue, [
+      match({
+        poolCid: app.config.poolCid,
+        buyOrderCid: buyOrder.contractId,
+        sellOrderCid: sellOrder.contractId,
+        matchId: 'wallet-signed-match',
+        factoryCid: app.config.factoryCid,
+        requestedAt: new Date(1_700_000_000_000).toISOString(),
+        allocateBefore: new Date(1_700_000_300_000).toISOString(),
+        settleBefore: new Date(1_700_003_600_000).toISOString(),
+      }),
+    ])
+    const endInclusive = await app.ctx.ledger.ledgerEnd()
+
+    // The sync endpoint must not trust client-supplied trade details. It reads
+    // the ledger update range, derives the parties from known orders, and then
+    // refreshes the projection so the archived orders disappear from the book.
+    const sync = await (
+      await post(app.base, '/venue/match-sync', { beginExclusive, endInclusive })
+    ).json()
+    assert.equal(sync.synced, 1)
+    assert.equal(sync.trades[0].buyer, alice)
+    assert.equal(sync.trades[0].seller, bob)
+    assert.equal(sync.trades[0].price, '1.5000000000')
+    assert.equal(sync.trades[0].quantity, '10.0000000000')
+
+    // Trader fills are now visible through the normal read API, proving the
+    // wallet-signed path has the same observable result as backend settlement.
+    const aliceView = await (
+      await fetch(`${app.base}/trade?party=${encodeURIComponent(alice)}`)
+    ).json()
+    assert.equal(aliceView.fills.length, 1)
+    assert.equal(aliceView.fills[0].side, 'Buy')
+    assert.equal(total(aliceView.balances, 'TTA'), '10.0000000000')
+    assert.equal(total(aliceView.balances, 'TTB'), '85.0000000000')
+
+    // Venue readers should see the settled trade and an empty book after sync.
     const venue = await (await fetch(`${app.base}/venue`)).json()
     assert.equal(venue.pools['TTA-TTB'].trades.length, 1)
     assert.equal(venue.pools['TTA-TTB'].book.length, 0)

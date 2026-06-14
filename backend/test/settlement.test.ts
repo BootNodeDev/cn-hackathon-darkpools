@@ -27,6 +27,7 @@ const fakeProjection = (recorded: Trade[]): Projection => ({
   refresh: async () => {},
   pools: () => [],
   openOrders: () => [order('b', 'alice', 'Buy'), order('s', 'bob', 'Sell')],
+  knownOrders: () => [order('b', 'alice', 'Buy'), order('s', 'bob', 'Sell')],
   holdings: () => [],
   trades: () => recorded,
   recordTrade: (trade) => {
