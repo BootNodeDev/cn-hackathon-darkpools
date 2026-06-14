@@ -7,6 +7,8 @@ export interface ActiveContract {
   templateId: string
   createArgument: Record<string, unknown>
   createdOffset: number
+  createdEventBlob?: string
+  synchronizerId?: string
 }
 
 export interface TxEvent {
@@ -32,7 +34,11 @@ export interface SubmitOpts {
 
 export interface Ledger {
   ledgerEnd: () => Promise<number>
-  activeContracts: (readAs: string, templateId: string) => Promise<ActiveContract[]>
+  activeContracts: (
+    readAs: string,
+    templateId: string,
+    opts?: { includeCreatedEventBlob?: boolean },
+  ) => Promise<ActiveContract[]>
   submit: (actAs: string, commands: object[], opts?: SubmitOpts) => Promise<TxEvent[]>
   updatesFrom: (
     readAs: string,
@@ -60,8 +66,8 @@ export const exerciseResult = (events: TxEvent[], choice: string): unknown => {
 const wildcardFilter = {
   identifierFilter: { WildcardFilter: { value: { includeCreatedEventBlob: false } } },
 }
-const templateFilter = (templateId: string) => ({
-  identifierFilter: { TemplateFilter: { value: { templateId, includeCreatedEventBlob: false } } },
+const templateFilter = (templateId: string, includeCreatedEventBlob = false) => ({
+  identifierFilter: { TemplateFilter: { value: { templateId, includeCreatedEventBlob } } },
 })
 
 const filtersByParty = (parties: string[], filter: object): Record<string, object> =>
@@ -90,23 +96,28 @@ export const createHttpLedger = (jsonApiUrl: string, tokens: TokenProvider): Led
   return {
     ledgerEnd,
 
-    activeContracts: async (readAs, templateId) => {
+    activeContracts: async (readAs, templateId, opts = {}) => {
       const activeAtOffset = await ledgerEnd()
       const result = (await call('POST', '/v2/state/active-contracts', {
         activeAtOffset,
         eventFormat: {
-          filtersByParty: filtersByParty([readAs], templateFilter(templateId)),
+          filtersByParty: filtersByParty(
+            [readAs],
+            templateFilter(templateId, opts.includeCreatedEventBlob ?? false),
+          ),
           verbose: true,
         },
-      })) as { contractEntry?: { JsActiveContract?: { createdEvent: ActiveContractEvent } } }[]
+      })) as { contractEntry?: { JsActiveContract?: ActiveContractRow } }[]
       return result
-        .map((entry) => entry.contractEntry?.JsActiveContract?.createdEvent)
-        .filter((event): event is ActiveContractEvent => event !== undefined)
-        .map((event) => ({
-          contractId: event.contractId,
-          templateId: event.templateId,
-          createArgument: event.createArgument,
-          createdOffset: event.offset,
+        .map((entry) => entry.contractEntry?.JsActiveContract)
+        .filter((active): active is ActiveContractRow => active !== undefined)
+        .map((active) => ({
+          contractId: active.createdEvent.contractId,
+          templateId: active.createdEvent.templateId,
+          createArgument: active.createdEvent.createArgument,
+          createdOffset: active.createdEvent.offset,
+          createdEventBlob: active.createdEvent.createdEventBlob,
+          synchronizerId: active.synchronizerId,
         }))
     },
 
@@ -156,4 +167,10 @@ type ActiveContractEvent = {
   templateId: string
   createArgument: Record<string, unknown>
   offset: number
+  createdEventBlob?: string
+}
+
+type ActiveContractRow = {
+  createdEvent: ActiveContractEvent
+  synchronizerId?: string
 }

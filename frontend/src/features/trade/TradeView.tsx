@@ -1,14 +1,12 @@
 import { useParty } from 'canton-connect-kit'
 import { motion } from 'framer-motion'
 import { useState } from 'react'
+import { PairSelect } from '@/components/PairSelect'
+import { ViewLoading } from '@/components/ui/ViewLoading'
 import { usePools } from '@/darkpool/hooks'
-import { Balances } from './Balances'
-import { ClearingChart } from './ClearingChart'
-import { MarketBar } from './MarketBar'
 import { MyFills } from './MyFills'
 import { MyOpenOrders } from './MyOpenOrders'
 import { OrderEntry } from './OrderEntry'
-import { ShieldedBook } from './ShieldedBook'
 
 const EASE = [0.16, 1, 0.3, 1] as const
 // Staggered entrance for each column/panel.
@@ -20,7 +18,7 @@ const rise = (delay: number) => ({
 
 export const TradeView = (): JSX.Element => {
   const { party } = useParty()
-  if (!party) return <div className="py-10 text-center text-muted-foreground">Loading…</div>
+  if (!party) return <ViewLoading />
   return <TradeWorkspace party={party.partyId} />
 }
 
@@ -29,32 +27,23 @@ export const TradeWorkspace = ({ party: partyId }: { party: string }): JSX.Eleme
   const [poolId, setPoolId] = useState(pools[0]?.poolId ?? '')
   const pool = pools.find((p) => p.poolId === poolId) ?? pools[0]
 
-  if (!pool) return <div className="py-10 text-center text-muted-foreground">Loading…</div>
+  if (!pool) return <ViewLoading />
 
   return (
-    <div className="flex flex-col gap-5">
+    <div data-testid="trade-view" data-pool-id={pool.poolId} className="flex flex-col gap-5">
       <h1 className="sr-only">Trade - CN Dark Pools</h1>
-      <MarketBar pool={pool} pools={pools} onPoolChange={setPoolId} />
 
-      <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[340px_1fr]">
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[340px_1fr]">
         <motion.div className="flex flex-col gap-4" {...rise(0)}>
+          <PairSelect pool={pool} pools={pools} onChange={setPoolId} />
           <OrderEntry pool={pool} party={partyId} />
-          <Balances pool={pool} party={partyId} />
         </motion.div>
 
         <motion.div className="flex flex-col gap-4" {...rise(0.1)}>
-          <ShieldedBook pool={pool} />
-          <ClearingChart pool={pool} />
+          <MyOpenOrders pool={pool} party={partyId} />
+          <MyFills pool={pool} party={partyId} />
         </motion.div>
       </div>
-
-      <motion.div {...rise(0.2)}>
-        <MyOpenOrders pool={pool} party={partyId} />
-      </motion.div>
-
-      <motion.div {...rise(0.3)}>
-        <MyFills pool={pool} party={partyId} />
-      </motion.div>
     </div>
   )
 }

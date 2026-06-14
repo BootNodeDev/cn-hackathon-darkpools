@@ -11,7 +11,7 @@ type TooltipProps = {
 export const Tooltip = ({
   content,
   label = 'More information',
-  side = 'bottom',
+  side,
 }: TooltipProps): JSX.Element => (
   <RadixTooltip.Root delayDuration={150}>
     <RadixTooltip.Trigger asChild>

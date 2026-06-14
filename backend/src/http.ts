@@ -6,8 +6,10 @@ import { cancelOrder, mint, placeOrder } from './commands.ts'
 import type { Config } from './config.ts'
 import { requiredFunding, selectFunding } from './funding.ts'
 import { createdCid, type Ledger } from './ledger.ts'
+import { findMatches } from './matcher.ts'
 import { bookFor, myOrders, type Projection, toBalances } from './projection.ts'
 import type { Scheduler } from './scheduler.ts'
+import { TEMPLATE_IDS } from './templateIds.ts'
 import type {
   Balance,
   FillDto,
@@ -75,6 +77,46 @@ const holdingsOf = (projection: Projection, party: string, instrument: Instrumen
 
 const balancesOf = (projection: Projection, config: Config, party: string): Balance[] =>
   toBalances(projection.holdings(), projection.openOrders(), party, instrumentsOf(config))
+
+// Shapes a created event as a Canton disclosed contract for interactive submits.
+const disclosedContract = (contract: {
+  contractId: string
+  templateId: string
+  createdEventBlob?: string
+  synchronizerId?: string
+}) => ({
+  templateId: contract.templateId,
+  contractId: contract.contractId,
+  createdEventBlob: contract.createdEventBlob ?? '',
+  synchronizerId: contract.synchronizerId ?? '',
+})
+
+// Returns the static ledger ids and disclosure the frontend needs to form txs.
+const getConfig =
+  (ctx: AppContext) =>
+  async (_req: Request, res: Response): Promise<void> => {
+    const pools = await ctx.ledger.activeContracts(
+      ctx.config.parties.venue,
+      TEMPLATE_IDS.darkPool,
+      {
+        includeCreatedEventBlob: true,
+      },
+    )
+    const pool = pools.find((candidate) => candidate.contractId === ctx.config.poolCid)
+    if (pool === undefined) {
+      res.status(404).json({ error: `pool ${ctx.config.poolCid} not found` })
+      return
+    }
+    res.json({
+      poolCid: ctx.config.poolCid,
+      factoryCid: ctx.config.factoryCid,
+      poolId: ctx.config.poolId,
+      parties: ctx.config.parties,
+      instruments: ctx.config.instruments,
+      templateIds: TEMPLATE_IDS,
+      disclosedContracts: [disclosedContract(pool)],
+    })
+  }
 
 const getVenue =
   (ctx: AppContext) =>
@@ -223,6 +265,17 @@ const postMatch =
     res.json({ ...report, schedule: ctx.scheduler.schedule() })
   }
 
+// Returns the matcher output only; the venue wallet submits settlement later.
+const postMatchPlan =
+  (ctx: AppContext) =>
+  async (_req: Request, res: Response): Promise<void> => {
+    await ctx.projection.refresh()
+    const ranAt = Date.now()
+    const pool = ctx.projection.pools().find((candidate) => candidate.poolId === ctx.config.poolId)
+    const plans = pool === undefined ? [] : findMatches(pool, ctx.projection.openOrders(), ranAt)
+    res.json({ ranAt, plans })
+  }
+
 const putSchedule =
   (ctx: AppContext) =>
   (req: Request, res: Response): void => {
@@ -247,12 +300,14 @@ export const createApp = (ctx: AppContext): Express => {
 
   app.get('/healthz', (_req, res) => res.json({ status: 'ok' }))
   app.get('/readyz', (_req, res) => res.json({ status: 'ready' }))
+  app.get('/config', getConfig(ctx))
   app.get('/venue', getVenue(ctx))
   app.get('/trade', getTrade(ctx))
   app.post('/faucet', postFaucet(ctx))
   app.post('/orders', postOrders(ctx))
   app.delete('/orders/:cid', deleteOrder(ctx))
   app.post('/venue/match', postMatch(ctx))
+  app.post('/venue/match-plan', postMatchPlan(ctx))
   app.put('/venue/schedule', putSchedule(ctx))
 
   app.use((error: unknown, _req: Request, res: Response, _next: express.NextFunction) => {

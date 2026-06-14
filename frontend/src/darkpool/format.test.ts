@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { formatNotional, formatPrice, formatQty } from './format.ts'
+import { formatPrice, formatQty } from './format.ts'
 
 describe('format', () => {
   it('formatPrice groups thousands with 2 dp', () => {
@@ -16,9 +16,5 @@ describe('format', () => {
     assert.equal(formatQty(0.5), '0.50')
     assert.equal(formatQty(0.45), '0.45')
     assert.equal(formatQty(1234.5), '1,234.50')
-  })
-  it('formatNotional groups thousands with 2 dp, truncated', () => {
-    assert.equal(formatNotional(25000), '25,000.00')
-    assert.equal(formatNotional(22477.559), '22,477.55')
   })
 })

@@ -70,6 +70,13 @@ export interface MatchResult {
   sellRemainder: Order | null
 }
 
+export interface MatchPlan {
+  poolId: string
+  buyOrderCid: string
+  sellOrderCid: string
+  fillQty: string
+}
+
 export interface PassResult {
   ranAt: number
   matched: number

@@ -20,16 +20,18 @@ src/
     types.ts                DarkPoolClient interface; Order, Fill, Trade, Pool, Balance types
     darkpoolMath.ts         pricing / crossing / fill arithmetic (tested)
     format.ts               amount, price, quantity, and time formatting (tested)
+    ledgerCommands.ts       builds Daml commands for wallet-executed actions (tested)
     hooks.ts                React hooks over the client (usePools, useBalances, useTrades, useMyFills, …)
     seed.ts                 seed data for the mock client
     DarkPoolProvider.tsx    React context that provides the active DarkPoolClient
     client/
+      HttpDarkPoolClient.ts REST + wallet client against the backend dark pool service
       MockDarkPoolClient.ts in-browser dark pool simulation (offline dev)
       simEngine.ts          background engine: seeds counterparties, runs matching on a timer
   features/
-    trade/                  trader view components (order form, open orders, fills, balances)
-    venue/                  venue view components (full book, match trigger, schedule)
-  components/               shared UI primitives (Stat, SideTag, TraderChip, ui/*: Select, Tooltip, Toast, …)
+    trade/                  trader view components (order form, open orders, fills)
+    venue/                  venue view components (full book, match trigger, settled matches)
+  components/               shared UI primitives (SideTag, TraderChip, ui/*: Select, Tooltip, Toast, …)
   theme/                    theme tokens / provider
   utils/                    pure helpers
 test/

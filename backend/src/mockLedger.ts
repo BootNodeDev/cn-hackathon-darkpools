@@ -270,6 +270,8 @@ export const createMockLedger = (config: BootstrapConfig): Ledger => {
             templateId: contract.templateId,
             createArgument: contract.createArgument,
             createdOffset: contract.createdOffset,
+            createdEventBlob: `${contract.contractId}-created-event-blob`,
+            synchronizerId: 'mock-synchronizer',
           }),
         ),
     submit: async (_actAs, commands) => {

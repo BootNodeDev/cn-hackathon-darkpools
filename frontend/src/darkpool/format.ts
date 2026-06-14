@@ -12,7 +12,6 @@ const num2 = grouped(2)
 
 // All numeric values render grouped with exactly 2 dp, truncated.
 export const formatPrice = (n: number): string => num2.format(truncateTo(n, 2))
-export const formatNotional = (n: number): string => num2.format(truncateTo(n, 2))
 export const formatQty = (n: number): string => num2.format(truncateTo(n, 2))
 
 // Settlement timestamp as a 24h clock.

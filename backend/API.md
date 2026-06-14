@@ -219,6 +219,19 @@ curl -X POST http://localhost:3020/venue/match
 ```
 `matched: []` if nothing crosses; `"skipped": true` if a pass was already running.
 
+### `POST /venue/match-plan`: **plan a matching pass without settling**
+No body. Refreshes the projection and runs the matcher, returning the plans **without** settling them on-ledger; the venue wallet submits settlement separately. Does not run `runPass()` or touch the heartbeat.
+```bash
+curl -X POST http://localhost:3020/venue/match-plan
+```
+```json
+{
+  "ranAt": 1750000000000,
+  "plans": [ { "buyOrderCid": "00a1b2c3", "sellOrderCid": "00d4e5f6", "fillQty": "8.0" } ]
+}
+```
+`plans: []` if nothing crosses.
+
 ### `PUT /venue/schedule`: **change the interval N**
 `{ intervalMs }`, 1 s to 24 h. Re-arms immediately. Not persisted.
 ```bash

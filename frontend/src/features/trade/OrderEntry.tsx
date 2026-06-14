@@ -4,9 +4,8 @@ import { SideToggle } from '@/components/ui/SideToggle'
 import { Spinner } from '@/components/ui/Spinner'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { toast } from '@/components/ui/toast'
-import { freeOf, quoteAmount, validateOrder } from '@/darkpool/darkpoolMath'
-import { formatNotional, formatPrice, formatQty } from '@/darkpool/format'
-import { useBalances, useDarkPoolActions, useTrades } from '@/darkpool/hooks'
+import { validateOrder } from '@/darkpool/darkpoolMath'
+import { useBalances, useDarkPoolActions } from '@/darkpool/hooks'
 import type { Pool, Side } from '@/darkpool/types'
 import { errorMessage } from '@/utils/errorMessage'
 
@@ -29,7 +28,6 @@ const INPUT_CLASS =
 
 export const OrderEntry = ({ pool, party }: { pool: Pool; party: string }): JSX.Element => {
   const balances = useBalances(party)
-  const trades = useTrades(pool.poolId)
   const { placeOrder } = useDarkPoolActions()
 
   const [side, setSide] = useState<Side>('Buy')
@@ -42,7 +40,6 @@ export const OrderEntry = ({ pool, party }: { pool: Pool; party: string }): JSX.
   const price = Number(limitPrice)
   const qty = Number(quantity)
   const min = Number(minFill)
-  const mid = trades[0]?.price ?? null
 
   const ttl = EXPIRY_MS[expiry]
   const req = {
@@ -54,19 +51,6 @@ export const OrderEntry = ({ pool, party }: { pool: Pool; party: string }): JSX.
     expiresAt: ttl === null ? null : Date.now() + ttl,
   }
   const validity = validateOrder(req, pool, balances)
-  const priced = qty > 0 && price > 0
-  const notional = priced ? quoteAmount(qty, price) : 0
-  const funding = side === 'Buy' ? notional : qty
-
-  const setPercent = (pct: number): void => {
-    const raw =
-      side === 'Sell'
-        ? freeOf(balances, pool.base.id) * pct
-        : price > 0
-          ? (freeOf(balances, pool.quote.id) * pct) / price
-          : 0
-    if (raw > 0) setQuantity(String(Math.floor(raw * 1e4) / 1e4))
-  }
 
   const submit = async (): Promise<void> => {
     if (!validity.ok) return
@@ -88,7 +72,11 @@ export const OrderEntry = ({ pool, party }: { pool: Pool; party: string }): JSX.
       : 'bg-down text-background hover:brightness-110'
 
   return (
-    <section className="rounded-2xl border border-border border-l-2 border-l-primary bg-surface p-5">
+    <section
+      data-testid="order-entry"
+      data-side={side}
+      className="rounded-2xl border border-border border-l-2 border-l-primary bg-surface p-5"
+    >
       <div className="mb-4 flex items-center gap-2">
         <h2 className="font-display text-base font-semibold text-foreground">
           Place private order
@@ -99,7 +87,9 @@ export const OrderEntry = ({ pool, party }: { pool: Pool; party: string }): JSX.
         />
       </div>
 
-      <SideToggle value={side} onChange={setSide} baseLabel={pool.baseLabel} />
+      <div data-testid="side-toggle">
+        <SideToggle value={side} onChange={setSide} baseLabel={pool.baseLabel} />
+      </div>
 
       <div className="mt-4">
         <div className="mb-1.5 flex items-center gap-1.5">
@@ -116,6 +106,7 @@ export const OrderEntry = ({ pool, party }: { pool: Pool; party: string }): JSX.
         </div>
         <input
           id="oe-price"
+          data-testid="limit-price-input"
           inputMode="decimal"
           value={limitPrice}
           onChange={(e) => setLimitPrice(e.target.value)}
@@ -133,24 +124,13 @@ export const OrderEntry = ({ pool, party }: { pool: Pool; party: string }): JSX.
         </label>
         <input
           id="oe-qty"
+          data-testid="quantity-input"
           inputMode="decimal"
           value={quantity}
           onChange={(e) => setQuantity(e.target.value)}
           placeholder="0.00"
           className={INPUT_CLASS}
         />
-        <div className="mt-2 grid grid-cols-4 gap-1.5">
-          {[0.25, 0.5, 0.75, 1].map((p) => (
-            <button
-              key={p}
-              type="button"
-              onClick={() => setPercent(p)}
-              className="rounded-md border border-border bg-muted py-1 text-xs text-muted-foreground transition hover:border-border-strong hover:text-foreground"
-            >
-              {p === 1 ? 'Max' : `${p * 100}%`}
-            </button>
-          ))}
-        </div>
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-2.5">
@@ -163,13 +143,14 @@ export const OrderEntry = ({ pool, party }: { pool: Pool; party: string }): JSX.
           </label>
           <input
             id="oe-minfill"
+            data-testid="min-fill-input"
             inputMode="decimal"
             value={minFill}
             onChange={(e) => setMinFill(e.target.value)}
             className={INPUT_CLASS}
           />
         </div>
-        <div>
+        <div data-testid="expiry-select">
           <span className="mb-1.5 block text-[0.7rem] font-semibold uppercase tracking-wider text-muted-foreground">
             Expiry
           </span>
@@ -182,32 +163,13 @@ export const OrderEntry = ({ pool, party }: { pool: Pool; party: string }): JSX.
         </div>
       </div>
 
-      <dl className="mt-4 rounded-lg border border-border bg-muted px-3.5 py-3 text-sm">
-        <div className="flex justify-between py-0.5">
-          <dt className="text-muted-foreground">Notional</dt>
-          <dd className="font-mono">
-            {formatNotional(notional)} {pool.quoteLabel}
-          </dd>
-        </div>
-        <div className="flex justify-between py-0.5">
-          <dt className="text-muted-foreground">Funding required</dt>
-          <dd className="font-mono">
-            {side === 'Buy'
-              ? `${formatNotional(funding)} ${pool.quoteLabel}`
-              : `${formatQty(funding)} ${pool.baseLabel}`}
-          </dd>
-        </div>
-        <div className="flex justify-between py-0.5">
-          <dt className="text-muted-foreground">Est. clearing</dt>
-          <dd className="font-mono text-mid">{mid === null ? '—' : `~${formatPrice(mid)}`}</dd>
-        </div>
-      </dl>
-
       <button
         type="button"
+        data-testid="place-order-button"
+        data-valid={validity.ok}
         onClick={submit}
         disabled={!validity.ok || submitting}
-        className={`mt-3 flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-55 ${buttonClass}`}
+        className={`mt-4 flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-55 ${buttonClass}`}
       >
         {submitting ? (
           <Spinner tone="background" label="Placing order" />
