@@ -31,7 +31,7 @@ src/
   features/
     trade/                  trader view components (order form, open orders, fills)
     venue/                  venue view components (full book, match trigger, settled matches)
-  components/               shared UI primitives (Stat, SideTag, TraderChip, ui/*: Select, Tooltip, Toast, …)
+  components/               shared UI primitives (SideTag, TraderChip, ui/*: Select, Tooltip, Toast, …)
   theme/                    theme tokens / provider
   utils/                    pure helpers
 test/
