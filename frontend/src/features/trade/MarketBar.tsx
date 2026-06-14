@@ -11,12 +11,8 @@ export const MarketBar = ({
   onPoolChange: (poolId: string) => void
 }): JSX.Element => {
   return (
-    <section
-      data-testid="market-bar"
-      data-pool-id={pool.poolId}
-      className="flex flex-wrap items-center gap-x-8 gap-y-3"
-    >
-      <div className="min-w-44" data-testid="pool-select">
+    <section data-testid="market-bar" data-pool-id={pool.poolId} className="w-full">
+      <div className="w-full" data-testid="pool-select">
         <Select
           value={pool.poolId}
           onChange={onPoolChange}
