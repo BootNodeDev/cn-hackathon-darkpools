@@ -8,15 +8,19 @@ const StatCard = ({
   label,
   children,
   sub,
+  testId,
 }: {
   label: string
   children: JSX.Element
   sub: string
+  testId: string
 }): JSX.Element => (
-  <div className="rounded-2xl border border-border bg-surface p-4">
+  <div data-testid={testId} className="rounded-2xl border border-border bg-surface p-6">
     <div className="text-[0.7rem] uppercase tracking-wider text-muted-foreground">{label}</div>
-    <div className="mt-1.5">{children}</div>
-    <div className="mt-1 text-xs text-soft">{sub}</div>
+    <div className="mt-2" data-testid={`${testId}-value`}>
+      {children}
+    </div>
+    <div className="mt-1.5 text-xs text-soft">{sub}</div>
   </div>
 )
 
@@ -29,36 +33,48 @@ export const VenueStats = ({ pool }: { pool: Pool }): JSX.Element => {
   const last = trades[0]
 
   return (
-    <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
-      <StatCard label="Orders in book" sub={`${buys} buys · ${sells} sells`}>
+    <div
+      data-testid="venue-stats"
+      className="mx-auto grid w-full max-w-3xl grid-cols-1 gap-4 sm:grid-cols-2"
+    >
+      <StatCard
+        testId="stat-orders-in-book"
+        label="Orders in book"
+        sub={`${buys} buys · ${sells} sells`}
+      >
         <Stat
           value={book.length}
           format={(n) => String(Math.round(n))}
-          className="font-mono text-2xl text-foreground"
-        />
-      </StatCard>
-      <StatCard label="Book notional" sub={`${pool.quoteLabel}-equivalent`}>
-        <Stat
-          value={notional}
-          format={formatNotional}
-          className="font-mono text-2xl text-foreground"
+          className="font-mono text-3xl text-foreground"
         />
       </StatCard>
       <StatCard
+        testId="stat-book-notional"
+        label="Book notional"
+        sub={`${pool.quoteLabel}-equivalent`}
+      >
+        <Stat
+          value={notional}
+          format={formatNotional}
+          className="font-mono text-3xl text-foreground"
+        />
+      </StatCard>
+      <StatCard
+        testId="stat-last-match"
         label="Last match"
         sub={last ? `${formatQty(last.quantity)} ${pool.baseLabel} · midpoint` : 'no matches yet'}
       >
         {last ? (
-          <Stat value={last.price} format={formatPrice} className="font-mono text-2xl text-mid" />
+          <Stat value={last.price} format={formatPrice} className="font-mono text-3xl text-mid" />
         ) : (
-          <span className="font-mono text-2xl text-soft">—</span>
+          <span className="font-mono text-3xl text-soft">—</span>
         )}
       </StatCard>
-      <StatCard label="Matches settled" sub="since boot">
+      <StatCard testId="stat-matches-settled" label="Matches settled" sub="since boot">
         <Stat
           value={trades.length}
           format={(n) => String(Math.round(n))}
-          className="font-mono text-2xl text-foreground"
+          className="font-mono text-3xl text-foreground"
         />
       </StatCard>
     </div>
