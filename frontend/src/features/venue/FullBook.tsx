@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion'
-import { useLayoutEffect, useRef } from 'react'
+import { type ReactNode, useLayoutEffect, useRef } from 'react'
 import { SideTag } from '@/components/SideTag'
 import { TraderChip } from '@/components/TraderChip'
 import { Tooltip } from '@/components/ui/Tooltip'
@@ -50,7 +50,7 @@ const Row = ({ order }: { order: Order }): JSX.Element => (
   </motion.tr>
 )
 
-export const FullBook = ({ pool }: { pool: Pool }): JSX.Element => {
+export const FullBook = ({ pool, action }: { pool: Pool; action?: ReactNode }): JSX.Element => {
   const book = useBook(pool.poolId)
   const mid = useTrades(pool.poolId)[0]?.price ?? null
   const sells = book.filter((o) => o.side === 'Sell').sort((a, b) => b.limitPrice - a.limitPrice)
@@ -69,11 +69,14 @@ export const FullBook = ({ pool }: { pool: Pool }): JSX.Element => {
       data-testid="full-book"
       className="overflow-hidden rounded-2xl border border-border bg-surface"
     >
-      <div className="flex items-center gap-2 border-b border-border px-5 py-3">
-        <span className="font-display text-base font-semibold text-foreground">
-          Full book · current
-        </span>
-        <Tooltip label="About the full book" content="venue sees every resting order" />
+      <div className="flex items-center justify-between gap-2 border-b border-border px-5 py-3">
+        <div className="flex items-center gap-2">
+          <span className="font-display text-base font-semibold text-foreground">
+            Full book · current
+          </span>
+          <Tooltip label="About the full book" content="venue sees every resting order" />
+        </div>
+        {action}
       </div>
       {book.length === 0 ? (
         <p

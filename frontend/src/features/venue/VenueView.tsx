@@ -33,16 +33,18 @@ export const VenueView = (): JSX.Element => {
         </div>
 
         <div className="flex flex-col gap-3.5">
-          <div className="flex h-[42px] items-center justify-end">
-            <span
-              data-testid="operator-badge"
-              className="inline-flex items-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary"
-            >
-              <span className="size-1.5 animate-pulse rounded-full bg-primary shadow-[0_0_8px_var(--color-primary)]" />
-              Operator
-            </span>
-          </div>
-          <FullBook pool={pool} />
+          <FullBook
+            pool={pool}
+            action={
+              <span
+                data-testid="operator-badge"
+                className="inline-flex items-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary"
+              >
+                <span className="size-1.5 animate-pulse rounded-full bg-primary shadow-[0_0_8px_var(--color-primary)]" />
+                Operator
+              </span>
+            }
+          />
           <SettledMatches pool={pool} />
         </div>
       </div>
