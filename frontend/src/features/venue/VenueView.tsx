@@ -4,7 +4,7 @@ import { ViewLoading } from '@/components/ui/ViewLoading'
 import { usePools } from '@/darkpool/hooks'
 import { FullBook } from './FullBook'
 import { MatchPanel } from './MatchPanel'
-import { SettledMatches } from './SettledMatches'
+//import { SettledMatches } from './SettledMatches'
 
 export const VenueView = (): JSX.Element => {
   const pools = usePools()
@@ -35,7 +35,7 @@ export const VenueView = (): JSX.Element => {
 
         <div className="flex flex-col gap-3.5">
           <FullBook pool={pool} />
-          <SettledMatches pool={pool} />
+          {/* <SettledMatches pool={pool} /> */}
         </div>
       </div>
     </div>

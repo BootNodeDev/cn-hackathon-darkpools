@@ -6,13 +6,13 @@ import { useDarkPoolActions } from '@/darkpool/hooks'
 import type { PassResult, Pool } from '@/darkpool/types'
 import { errorMessage } from '@/utils/errorMessage'
 
-const formatRelative = (ms: number): string => {
-  const delta = Math.max(0, ms - Date.now())
-  const seconds = Math.round(delta / 1000)
-  if (seconds < 60) return `in ${seconds}s`
-  const minutes = Math.round(seconds / 60)
-  return `in ${minutes}m`
-}
+// const formatRelative = (ms: number): string => {
+//   const delta = Math.max(0, ms - Date.now())
+//   const seconds = Math.round(delta / 1000)
+//   if (seconds < 60) return `in ${seconds}s`
+//   const minutes = Math.round(seconds / 60)
+//   return `in ${minutes}m`
+// }
 
 export const MatchPanel = ({ pool }: { pool: Pool }): JSX.Element => {
   const { runMatchPass } = useDarkPoolActions()
@@ -24,11 +24,11 @@ export const MatchPanel = ({ pool }: { pool: Pool }): JSX.Element => {
     try {
       const result = await runMatchPass()
       setLast(result)
-      if (result.matched === 0 && result.rejected === 0) {
-        toast.success('Pass complete · no crossing pairs')
-      } else {
-        toast.success(`Pass complete · matched ${result.matched}, rejected ${result.rejected}`)
-      }
+      // if (result.matched === 0 && result.rejected === 0) {
+      //   toast.success('Pass complete · no crossing pairs')
+      // } else {
+      //   toast.success(`Pass complete · matched ${result.matched}, rejected ${result.rejected}`)
+      // }
     } catch (e) {
       toast.error(errorMessage(e))
     } finally {
@@ -64,7 +64,7 @@ export const MatchPanel = ({ pool }: { pool: Pool }): JSX.Element => {
         {running ? <Spinner tone="primary" label="Running pass" /> : 'Run matching pass now'}
       </button>
 
-      {last && (
+      {/* {last && (
         <dl
           data-testid="match-result"
           className="mt-4 rounded-lg border border-border bg-muted px-3.5 py-3 text-sm"
@@ -91,7 +91,7 @@ export const MatchPanel = ({ pool }: { pool: Pool }): JSX.Element => {
             </dd>
           </div>
         </dl>
-      )}
+      )} */}
     </section>
   )
 }
