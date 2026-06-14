@@ -27,7 +27,6 @@ export const Tooltip = ({
       <RadixTooltip.Content
         side={side}
         sideOffset={3}
-        avoidCollisions
         collisionPadding={8}
         className="z-50 w-72 rounded-md border border-border bg-surface px-3 py-2 text-[0.78rem] leading-snug text-foreground shadow-[var(--shadow-popover)] data-[state=open]:animate-zoom-in-and-fade"
       >

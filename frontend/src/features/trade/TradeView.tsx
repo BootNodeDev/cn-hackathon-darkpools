@@ -1,8 +1,8 @@
 import { useParty } from 'canton-connect-kit'
 import { motion } from 'framer-motion'
 import { useState } from 'react'
+import { PairSelect } from '@/components/PairSelect'
 import { usePools } from '@/darkpool/hooks'
-import { MarketBar } from './MarketBar'
 import { MyFills } from './MyFills'
 import { MyOpenOrders } from './MyOpenOrders'
 import { OrderEntry } from './OrderEntry'
@@ -34,7 +34,7 @@ export const TradeWorkspace = ({ party: partyId }: { party: string }): JSX.Eleme
 
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[340px_1fr]">
         <motion.div className="flex flex-col gap-4" {...rise(0)}>
-          <MarketBar pool={pool} pools={pools} onPoolChange={setPoolId} />
+          <PairSelect pool={pool} pools={pools} onChange={setPoolId} />
           <OrderEntry pool={pool} party={partyId} />
         </motion.div>
 

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Select } from '@/components/ui/Select'
+import { PairSelect } from '@/components/PairSelect'
 import { usePools } from '@/darkpool/hooks'
 import { FullBook } from './FullBook'
 import { MatchPanel } from './MatchPanel'
@@ -28,17 +28,7 @@ export const VenueView = (): JSX.Element => {
 
       <div className="grid grid-cols-1 items-start gap-3.5 lg:grid-cols-[340px_1fr]">
         <div className="flex flex-col gap-3.5">
-          <div className="w-full" data-testid="pool-select">
-            <Select
-              value={pool.poolId}
-              onChange={setPoolId}
-              ariaLabel="Trading pair"
-              options={pools.map((p) => ({
-                value: p.poolId,
-                label: `${p.baseLabel} / ${p.quoteLabel}`,
-              }))}
-            />
-          </div>
+          <PairSelect pool={pool} pools={pools} onChange={setPoolId} />
           <MatchPanel pool={pool} />
         </div>
 
