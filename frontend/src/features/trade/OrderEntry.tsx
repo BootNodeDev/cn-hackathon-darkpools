@@ -4,9 +4,8 @@ import { SideToggle } from '@/components/ui/SideToggle'
 import { Spinner } from '@/components/ui/Spinner'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { toast } from '@/components/ui/toast'
-import { quoteAmount, validateOrder } from '@/darkpool/darkpoolMath'
-import { formatNotional, formatPrice, formatQty } from '@/darkpool/format'
-import { useBalances, useDarkPoolActions, useTrades } from '@/darkpool/hooks'
+import { validateOrder } from '@/darkpool/darkpoolMath'
+import { useBalances, useDarkPoolActions } from '@/darkpool/hooks'
 import type { Pool, Side } from '@/darkpool/types'
 import { errorMessage } from '@/utils/errorMessage'
 
@@ -29,7 +28,6 @@ const INPUT_CLASS =
 
 export const OrderEntry = ({ pool, party }: { pool: Pool; party: string }): JSX.Element => {
   const balances = useBalances(party)
-  const trades = useTrades(pool.poolId)
   const { placeOrder } = useDarkPoolActions()
 
   const [side, setSide] = useState<Side>('Buy')
@@ -42,7 +40,6 @@ export const OrderEntry = ({ pool, party }: { pool: Pool; party: string }): JSX.
   const price = Number(limitPrice)
   const qty = Number(quantity)
   const min = Number(minFill)
-  const mid = trades[0]?.price ?? null
 
   const ttl = EXPIRY_MS[expiry]
   const req = {
@@ -54,9 +51,6 @@ export const OrderEntry = ({ pool, party }: { pool: Pool; party: string }): JSX.
     expiresAt: ttl === null ? null : Date.now() + ttl,
   }
   const validity = validateOrder(req, pool, balances)
-  const priced = qty > 0 && price > 0
-  const notional = priced ? quoteAmount(qty, price) : 0
-  const funding = side === 'Buy' ? notional : qty
 
   const submit = async (): Promise<void> => {
     if (!validity.ok) return
@@ -169,39 +163,13 @@ export const OrderEntry = ({ pool, party }: { pool: Pool; party: string }): JSX.
         </div>
       </div>
 
-      <dl
-        data-testid="order-summary"
-        className="mt-4 rounded-lg border border-border bg-muted px-3.5 py-3 text-sm"
-      >
-        <div className="flex justify-between py-0.5">
-          <dt className="text-muted-foreground">Notional</dt>
-          <dd className="font-mono" data-testid="summary-notional">
-            {formatNotional(notional)} {pool.quoteLabel}
-          </dd>
-        </div>
-        <div className="flex justify-between py-0.5">
-          <dt className="text-muted-foreground">Funding required</dt>
-          <dd className="font-mono" data-testid="summary-funding">
-            {side === 'Buy'
-              ? `${formatNotional(funding)} ${pool.quoteLabel}`
-              : `${formatQty(funding)} ${pool.baseLabel}`}
-          </dd>
-        </div>
-        <div className="flex justify-between py-0.5">
-          <dt className="text-muted-foreground">Est. clearing</dt>
-          <dd className="font-mono text-mid" data-testid="summary-clearing">
-            {mid === null ? '—' : `~${formatPrice(mid)}`}
-          </dd>
-        </div>
-      </dl>
-
       <button
         type="button"
         data-testid="place-order-button"
         data-valid={validity.ok}
         onClick={submit}
         disabled={!validity.ok || submitting}
-        className={`mt-3 flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-55 ${buttonClass}`}
+        className={`mt-4 flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-55 ${buttonClass}`}
       >
         {submitting ? (
           <Spinner tone="background" label="Placing order" />

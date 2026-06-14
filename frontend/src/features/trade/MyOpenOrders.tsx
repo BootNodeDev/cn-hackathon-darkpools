@@ -85,7 +85,7 @@ export const MyOpenOrders = ({ pool, party }: { pool: Pool; party: string }): JS
         <span className="font-display text-base font-semibold text-foreground">My open orders</span>
         <span
           data-testid="open-orders-count"
-          className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+          className="inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-xs font-semibold text-primary-foreground"
         >
           {orders.length}
         </span>
