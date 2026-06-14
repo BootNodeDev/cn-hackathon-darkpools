@@ -2,6 +2,7 @@ import { useParty } from 'canton-connect-kit'
 import { motion } from 'framer-motion'
 import { useState } from 'react'
 import { PairSelect } from '@/components/PairSelect'
+import { ViewLoading } from '@/components/ui/ViewLoading'
 import { usePools } from '@/darkpool/hooks'
 import { MyFills } from './MyFills'
 import { MyOpenOrders } from './MyOpenOrders'
@@ -17,7 +18,7 @@ const rise = (delay: number) => ({
 
 export const TradeView = (): JSX.Element => {
   const { party } = useParty()
-  if (!party) return <div className="py-10 text-center text-muted-foreground">Loading…</div>
+  if (!party) return <ViewLoading />
   return <TradeWorkspace party={party.partyId} />
 }
 
@@ -26,7 +27,7 @@ export const TradeWorkspace = ({ party: partyId }: { party: string }): JSX.Eleme
   const [poolId, setPoolId] = useState(pools[0]?.poolId ?? '')
   const pool = pools.find((p) => p.poolId === poolId) ?? pools[0]
 
-  if (!pool) return <div className="py-10 text-center text-muted-foreground">Loading…</div>
+  if (!pool) return <ViewLoading />
 
   return (
     <div data-testid="trade-view" data-pool-id={pool.poolId} className="flex flex-col gap-5">

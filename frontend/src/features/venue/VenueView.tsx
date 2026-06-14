@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { PairSelect } from '@/components/PairSelect'
+import { ViewLoading } from '@/components/ui/ViewLoading'
 import { usePools } from '@/darkpool/hooks'
 import { FullBook } from './FullBook'
 import { MatchPanel } from './MatchPanel'
@@ -10,7 +11,7 @@ export const VenueView = (): JSX.Element => {
   const [poolId, setPoolId] = useState(pools[0]?.poolId ?? '')
   const pool = pools.find((p) => p.poolId === poolId) ?? pools[0]
 
-  if (!pool) return <div className="py-10 text-center text-muted-foreground">Loading…</div>
+  if (!pool) return <ViewLoading />
 
   return (
     <div data-testid="venue-view" data-pool-id={pool.poolId} className="flex flex-col gap-3.5">
